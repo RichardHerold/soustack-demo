@@ -84,10 +84,112 @@ async function maybeFetchUrl(text: string): Promise<string> {
     
     const html = await res.text();
     
-    // Extract text content, strip HTML tags
+    // Try to extract JSON-LD structured data first (schema.org Recipe)
+    const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let jsonLdMatch;
+    while ((jsonLdMatch = jsonLdRegex.exec(html)) !== null) {
+      const jsonContent = jsonLdMatch[1].trim();
+      
+      try {
+        const data = JSON.parse(jsonContent);
+        // Handle both single objects and arrays
+        const recipes = Array.isArray(data) 
+          ? data.filter((item: any) => item['@type'] === 'Recipe' || item.type === 'Recipe')
+          : (data['@type'] === 'Recipe' || data.type === 'Recipe' ? [data] : []);
+        
+        if (recipes.length > 0) {
+          const recipe = recipes[0];
+          // Convert structured data to readable text format
+          const parts: string[] = [];
+          
+          if (recipe.name) parts.push(recipe.name);
+          if (recipe.description) parts.push(recipe.description);
+          if (recipe.recipeYield) parts.push(`Serves: ${recipe.recipeYield}`);
+          if (recipe.prepTime) parts.push(`Prep time: ${recipe.prepTime}`);
+          if (recipe.cookTime) parts.push(`Cook time: ${recipe.cookTime}`);
+          if (recipe.totalTime) parts.push(`Total time: ${recipe.totalTime}`);
+          
+          if (recipe.recipeIngredient && Array.isArray(recipe.recipeIngredient)) {
+            parts.push('\nIngredients:');
+            recipe.recipeIngredient.forEach((ing: string) => {
+              parts.push(`- ${ing}`);
+            });
+          }
+          
+          if (recipe.recipeInstructions) {
+            parts.push('\nInstructions:');
+            const instructions = Array.isArray(recipe.recipeInstructions)
+              ? recipe.recipeInstructions
+              : [recipe.recipeInstructions];
+            
+            instructions.forEach((inst: any, idx: number) => {
+              if (typeof inst === 'string') {
+                parts.push(`${idx + 1}. ${inst}`);
+              } else if (inst.text) {
+                parts.push(`${idx + 1}. ${inst.text}`);
+              } else if (inst['@type'] === 'HowToStep' && inst.text) {
+                parts.push(`${idx + 1}. ${inst.text}`);
+              }
+            });
+          }
+          
+          const structuredText = parts.join('\n');
+          // Truncate to ~8000 chars to stay within token limits
+          return structuredText.slice(0, 8000);
+        }
+      } catch {
+        // If JSON parsing fails, continue to fallback methods
+        continue;
+      }
+    }
+    
+    // Fallback: Try to find main content area
+    // Look for common recipe content selectors
+    const contentSelectors = [
+      /<article[^>]*>([\s\S]*?)<\/article>/i,
+      /<main[^>]*>([\s\S]*?)<\/main>/i,
+      /<div[^>]*class=["'][^"']*recipe[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      /<div[^>]*id=["'][^"']*recipe[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+      /<div[^>]*class=["'][^"']*content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
+    ];
+    
+    for (const selector of contentSelectors) {
+      const match = html.match(selector);
+      if (match && match[1]) {
+        const content = match[1];
+        // Remove scripts, styles, and other non-content elements
+        const textContent = content
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+          .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+          .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+          .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/\s+/g, ' ')
+          .trim();
+        
+        if (textContent.length > 200) {
+          // Truncate to ~8000 chars to stay within token limits
+          return textContent.slice(0, 8000);
+        }
+      }
+    }
+    
+    // Final fallback: Extract text content from entire page, strip HTML tags
     const textContent = html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+      .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
       .replace(/<[^>]+>/g, ' ')
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
