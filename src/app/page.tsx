@@ -28,10 +28,7 @@ export default function Home() {
       const data = await res.json();
       
       if (!res.ok) {
-        // Handle rate limit errors with retry information
-        if (res.status === 429 && data.retryAfter) {
-          throw new Error(`${data.error} (Retry after ${data.retryAfter}s)`);
-        }
+        // For rate limit errors, the API already includes retry timing in the message
         throw new Error(data.error || 'Conversion failed');
       }
       
