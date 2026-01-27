@@ -94,7 +94,11 @@ function normalizeInstructions(items: Instruction[]): DisplayInstruction[] {
   });
 }
 
-function formatTiming(timing: Instruction extends { timing?: infer T } ? T : never): string | undefined {
+function formatTiming(timing?: {
+  duration?: { minutes?: number; hours?: number };
+  activity?: 'active' | 'passive';
+  completionCue?: string;
+}): string | undefined {
   if (!timing || typeof timing !== 'object') return undefined;
   
   const duration = timing.duration;
