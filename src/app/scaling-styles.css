@@ -1,0 +1,136 @@
+/* ==========================================================================
+   Scaling UI Additions
+   Add these to your globals.css
+   ========================================================================== */
+
+/* Servings Control */
+.servings-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.servings-adjuster {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-bg-muted);
+  border-radius: var(--radius-md);
+  padding: 4px 8px;
+}
+
+.servings-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  transition: background-color 0.15s;
+}
+
+.servings-btn:hover:not(:disabled) {
+  background: var(--color-bg-elevated);
+}
+
+.servings-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.servings-value {
+  min-width: 32px;
+  text-align: center;
+  font-size: var(--text-base, 16px);
+  font-weight: 600;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.servings-value--scaled {
+  color: var(--color-primary);
+}
+
+.servings-unit {
+  font-size: var(--text-sm, 14px);
+  color: var(--color-text-muted);
+  margin-left: 4px;
+}
+
+.servings-reset {
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-size: var(--text-xs, 12px);
+  color: var(--color-text-subtle);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s;
+}
+
+.servings-reset:hover {
+  color: var(--color-text-muted);
+}
+
+/* Scaling Banner */
+.scaling-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin: 0 0 var(--space-lg);
+  background: var(--color-primary-light);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm, 14px);
+  color: var(--color-primary);
+}
+
+.scaling-icon {
+  font-size: 16px;
+}
+
+.scaling-factor {
+  margin-left: 4px;
+  opacity: 0.8;
+}
+
+/* Scaled Ingredient Styling */
+.ingredient-item--scaled {
+  background: linear-gradient(90deg, var(--color-primary-light) 0%, transparent 100%);
+  margin-left: -8px;
+  padding-left: 8px;
+  border-radius: var(--radius-sm);
+}
+
+.ingredient-qty--scaled {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.ingredient-original {
+  margin-left: 8px;
+  font-size: var(--text-xs, 12px);
+  color: var(--color-text-subtle);
+  font-style: italic;
+}
+
+/* Animation for scaling changes */
+@keyframes scaleHighlight {
+  0% {
+    background-color: var(--color-primary-light);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.ingredient-item--scaled .ingredient-qty {
+  animation: scaleHighlight 0.3s ease-out;
+}
