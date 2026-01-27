@@ -1,17 +1,26 @@
 /**
  * Soustack Lite Recipe - the core data format
  */
-export type SoustackLiteRecipe = {
+export type SoustackRecipe = {
   $schema: string;
-  profile: 'lite';
+  profile: 'lite' | 'base';
   stacks: Record<string, number>;
   name: string;
   description?: string;
   servings?: string;
+  yield?: { amount: number; unit: string };
+  time?: { total: { minutes: number } };
   ingredients: Ingredient[];
   instructions: Instruction[];
   miseEnPlace?: MiseEnPlaceItem[];
   storage?: StorageInfo;
+  'x-soustack'?: {
+    source?: {
+      text: string;
+      convertedAt: string;
+      converter: string;
+    };
+  };
   'x-mise'?: {
     source?: {
       text: string;

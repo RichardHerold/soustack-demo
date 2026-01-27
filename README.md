@@ -55,7 +55,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## Stack
 
-- Next.js 14 (App Router)
+- Next.js 16 (App Router)
 - Google Gemini 2.0 Flash Lite (AI conversion)
 - Zero database, zero auth
 
