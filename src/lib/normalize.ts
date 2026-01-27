@@ -7,6 +7,9 @@ import type {
   Instruction 
 } from './types';
 
+// Extract the timing type from Instruction
+type InstructionTiming = Extract<Instruction, { timing?: unknown }>['timing'];
+
 /**
  * Transform a SoustackLiteRecipe into a normalized display format
  */
@@ -94,11 +97,7 @@ function normalizeInstructions(items: Instruction[]): DisplayInstruction[] {
   });
 }
 
-function formatTiming(timing?: {
-  duration?: { minutes?: number; hours?: number };
-  activity?: 'active' | 'passive';
-  completionCue?: string;
-}): string | undefined {
+function formatTiming(timing: InstructionTiming): string | undefined {
   if (!timing || typeof timing !== 'object') return undefined;
   
   const duration = timing.duration;
