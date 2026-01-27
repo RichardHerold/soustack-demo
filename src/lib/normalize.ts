@@ -1,5 +1,5 @@
 import type { 
-  SoustackLiteRecipe, 
+  SoustackRecipe, 
   DisplayRecipe, 
   DisplayIngredient, 
   DisplayInstruction,
@@ -11,9 +11,9 @@ import type {
 type InstructionTiming = Extract<Instruction, { timing?: unknown }>['timing'];
 
 /**
- * Transform a SoustackLiteRecipe into a normalized display format
+ * Transform a SoustackRecipe into a normalized display format
  */
-export function normalizeToDisplay(recipe: SoustackLiteRecipe): DisplayRecipe {
+export function normalizeToDisplay(recipe: SoustackRecipe): DisplayRecipe {
   const ingredients = normalizeIngredients(recipe.ingredients);
   const instructions = normalizeInstructions(recipe.instructions);
   const miseEnPlace = normalizeMiseEnPlace(recipe.miseEnPlace);
@@ -39,7 +39,7 @@ export function normalizeToDisplay(recipe: SoustackLiteRecipe): DisplayRecipe {
   };
 }
 
-function normalizeMiseEnPlace(items: SoustackLiteRecipe['miseEnPlace']): string[] {
+function normalizeMiseEnPlace(items: SoustackRecipe['miseEnPlace']): string[] {
   if (!items || !Array.isArray(items)) return [];
   return items
     .map(item => typeof item === 'string' ? item : item.text)
@@ -141,7 +141,7 @@ function formatTiming(timing: InstructionTiming): string | undefined {
   return result;
 }
 
-function normalizeStorage(storage: SoustackLiteRecipe['storage']): DisplayRecipe['storage'] | undefined {
+function normalizeStorage(storage: SoustackRecipe['storage']): DisplayRecipe['storage'] | undefined {
   if (!storage) return undefined;
   
   const result: DisplayRecipe['storage'] = {};

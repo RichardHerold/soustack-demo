@@ -1,9 +1,9 @@
 /**
  * Soustack Lite Recipe - the core data format
  */
-export type SoustackLiteRecipe = {
+export type SoustackRecipe = {
   $schema: string;
-  profile: 'lite';
+  profile: 'lite' | 'base';
   stacks: Record<string, number>;
   name: string;
   description?: string;
