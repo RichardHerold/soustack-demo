@@ -175,7 +175,21 @@ function parseRateLimitError(error: unknown): { isRateLimit: boolean; retryAfter
       retryAfter = Math.ceil(parseFloat(retryMatch[1]));
     }
     
-    // Check if it's a quota exceeded error
+    // Check for daily quota exhaustion (limit: 0 indicates quota is fully exhausted)
+    const hasDailyQuota = errorMessage.includes('GenerateRequestsPerDay') || 
+                          errorMessage.includes('PerDay');
+    const hasLimitZero = errorMessage.includes('limit: 0');
+    
+    // If it's a daily quota with limit: 0, the quota is exhausted and won't reset for hours
+    if (hasDailyQuota && hasLimitZero) {
+      return {
+        isRateLimit: true,
+        retryAfter: undefined, // Don't show retry time for daily quota exhaustion
+        message: 'Daily API quota exhausted. Your free tier daily limit has been reached. The quota will reset in approximately 24 hours, or you can upgrade your plan in Google AI Studio.'
+      };
+    }
+    
+    // Check if it's a quota exceeded error (but not daily limit exhausted)
     if (errorMessage.includes('quota') || errorMessage.includes('Quota exceeded')) {
       return {
         isRateLimit: true,
@@ -252,9 +266,10 @@ export async function POST(request: NextRequest) {
       
       // Check for rate limit errors
       const rateLimitInfo = parseRateLimitError(error);
+      
       if (rateLimitInfo.isRateLimit) {
         return NextResponse.json(
-          { 
+          {
             error: rateLimitInfo.message,
             retryAfter: rateLimitInfo.retryAfter,
             code: 'RATE_LIMIT'
