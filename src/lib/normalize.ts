@@ -77,8 +77,8 @@ function normalizeIngredients(items: Ingredient[]): DisplayIngredient[] {
       parts.push(`— ${item.notes}`);
     }
     
-    // It's structured if we have quantity or unit parsed out
-    const isStructured = item.quantity !== undefined || item.unit !== undefined;
+    // It's structured if we have quantity, unit, or toTaste parsed out
+    const isStructured = item.quantity !== undefined || item.unit !== undefined || item.toTaste === true;
     
     return {
       id,
@@ -146,13 +146,13 @@ function normalizeStorage(storage: SoustackLiteRecipe['storage']): DisplayRecipe
   
   const result: DisplayRecipe['storage'] = {};
   
-  if (storage.refrigerated) {
+  if (storage.refrigerated && storage.refrigerated.duration) {
     result.refrigerated = formatStorageDuration(storage.refrigerated);
   }
-  if (storage.frozen) {
+  if (storage.frozen && storage.frozen.duration) {
     result.frozen = formatStorageDuration(storage.frozen);
   }
-  if (storage.roomTemp) {
+  if (storage.roomTemp && storage.roomTemp.duration) {
     result.roomTemp = formatStorageDuration(storage.roomTemp);
   }
   
@@ -161,7 +161,13 @@ function normalizeStorage(storage: SoustackLiteRecipe['storage']): DisplayRecipe
 }
 
 function formatStorageDuration(method: { duration: { iso8601: string }; notes?: string }): string {
-  const iso = method.duration.iso8601;
+  const iso = method?.duration?.iso8601;
+  
+  // If iso8601 is missing, return a fallback or just notes if available
+  if (!iso || typeof iso !== 'string') {
+    return method?.notes || 'Duration not specified';
+  }
+  
   let text = iso;
   
   const dayMatch = iso.match(/P(\d+)D/);

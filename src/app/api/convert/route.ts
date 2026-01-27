@@ -27,7 +27,9 @@ OUTPUT FORMAT (JSON only, no markdown):
   ],
   "ingredients": [
     { "name": "ingredient name", "quantity": 2, "unit": "cups", "notes": "optional notes" },
-    { "name": "salt", "toTaste": true }
+    { "name": "salt", "toTaste": true },
+    { "name": "pepper", "toTaste": true },
+    { "name": "apples", "quantity": 5, "toTaste": true }
   ],
   "instructions": [
     { "text": "Step description", "timing": { "duration": { "minutes": 10 }, "activity": "active" } },
@@ -48,6 +50,18 @@ IMPORTANT RULES:
   * Toasting nuts/spices
   * Any "meanwhile, prepare..." tasks
 - Parse quantities as numbers when possible (1.5, not "1 1/2")
+- CRITICAL - "to taste" handling: When an ingredient mentions "to taste" in ANY form, set "toTaste": true and DO NOT include "to taste" in the name or notes fields:
+  * "salt to taste" → { "name": "salt", "toTaste": true }
+  * "pepper to taste" → { "name": "pepper", "toTaste": true }
+  * "flaky sea salt to taste" → { "name": "flaky sea salt", "toTaste": true }
+  * "kosher salt to taste" → { "name": "kosher salt", "toTaste": true }
+  * "Maldon salt to taste" → { "name": "Maldon salt", "toTaste": true }
+  * "black pepper to taste" → { "name": "black pepper", "toTaste": true }
+  * "salt and pepper to taste" → { "name": "salt", "toTaste": true }, { "name": "pepper", "toTaste": true }
+  * "5 apples, or more to taste" → { "name": "apples", "quantity": 5, "toTaste": true }
+  * "season to taste" in instructions → infer which ingredients (usually salt, pepper, or specific salt/pepper types) and set toTaste: true
+  * Look for patterns: "to taste", "to taste,", ", to taste", "or more to taste", "season to taste"
+  * IMPORTANT: Preserve descriptive names (e.g., "flaky sea salt", "kosher salt") but remove "to taste" from them
 - Identify passive vs active time:
   * active = hands-on cooking (sautéing, stirring)
   * passive = waiting (baking, marinating, resting, simmering unattended)
@@ -220,11 +234,130 @@ async function maybeFetchUrl(text: string): Promise<string> {
   }
 }
 
+function fixToTasteIngredients(ingredients: unknown[]): unknown[] {
+  if (!Array.isArray(ingredients)) return ingredients;
+  
+  const result: unknown[] = [];
+  
+  for (const ing of ingredients) {
+    // Handle string ingredients that might contain "to taste"
+    if (typeof ing === 'string') {
+      const toTastePattern = /\b(to taste|to taste,|, to taste)\b/i;
+      if (toTastePattern.test(ing)) {
+        // Try to parse the string into a structured ingredient
+        // Pattern: "flaky sea salt to taste" or "salt and pepper to taste"
+        const andPattern = /^(.*?)\s+and\s+(.*?)\s+to\s+taste$/i;
+        const andMatch = ing.match(andPattern);
+        
+        if (andMatch) {
+          // Split into two ingredients
+          result.push({ name: andMatch[1].trim(), toTaste: true });
+          result.push({ name: andMatch[2].trim(), toTaste: true });
+          continue;
+        }
+        
+        // Pattern: "X to taste" where X could be "flaky sea salt", "kosher salt", etc.
+        const singlePattern = /^(.+?)\s+to\s+taste$/i;
+        const singleMatch = ing.match(singlePattern);
+        
+        if (singleMatch) {
+          const name = singleMatch[1].trim();
+          result.push({ name, toTaste: true });
+          continue;
+        }
+      }
+      // If no "to taste" pattern, keep as string
+      result.push(ing);
+      continue;
+    }
+    
+    // Handle object ingredients
+    if (typeof ing !== 'object' || ing === null) {
+      result.push(ing);
+      continue;
+    }
+    
+    // Check if "to taste" appears in notes
+    if (typeof ing === 'object' && 'notes' in ing && typeof ing.notes === 'string') {
+      const toTastePattern = /\b(to taste|to taste,|, to taste|or more to taste)\b/i;
+      if (toTastePattern.test(ing.notes)) {
+        // Remove "to taste" patterns from notes
+        const cleanedNotes = ing.notes
+          .replace(/\b(to taste|to taste,|, to taste)\b/gi, '')
+          .replace(/\bor more to taste\b/gi, '')
+          .replace(/,\s*,/g, ',') // Fix double commas
+          .replace(/^\s*,\s*|\s*,\s*$/g, '') // Remove leading/trailing commas
+          .trim();
+        
+        result.push({
+          ...ing,
+          toTaste: true,
+          notes: cleanedNotes || undefined,
+        });
+        continue;
+      }
+    }
+    
+    // Check if "to taste" appears in name
+    if ('name' in ing && typeof ing.name === 'string') {
+      const name = ing.name;
+      const toTastePattern = /\b(to taste|to taste,|, to taste)\b/i;
+      
+      // Check for compound ingredients like "salt and pepper to taste"
+      const andPattern = /^(.*?)\s+and\s+(.*?)\s+to\s+taste$/i;
+      const andMatch = name.match(andPattern);
+      
+      if (andMatch) {
+        // Split into two ingredients: salt and pepper
+        const firstIng = andMatch[1].trim();
+        const secondIng = andMatch[2].trim();
+        
+        // Create two separate ingredients with toTaste: true
+        result.push({
+          ...ing,
+          name: firstIng,
+          toTaste: true,
+        });
+        result.push({
+          ...ing,
+          name: secondIng,
+          toTaste: true,
+        });
+        continue;
+      }
+      
+      if (toTastePattern.test(name)) {
+        // Remove "to taste" patterns from name, preserving the rest
+        const cleanedName = name
+          .replace(/\b(to taste|to taste,|, to taste)\b/gi, '')
+          .replace(/\s+/g, ' ') // Normalize whitespace
+          .trim();
+        
+        result.push({
+          ...ing,
+          name: cleanedName,
+          toTaste: true,
+        });
+        continue;
+      }
+    }
+    
+    result.push(ing);
+  }
+  
+  return result;
+}
+
 function transformToSoustackRecipe(
   parsed: Record<string, unknown>,
   originalText: string
 ): SoustackLiteRecipe {
   const now = new Date().toISOString();
+  
+  // Fix ingredients where "to taste" might be in notes or name
+  const fixedIngredients = fixToTasteIngredients(
+    Array.isArray(parsed.ingredients) ? parsed.ingredients : []
+  );
   
   return {
     $schema: 'https://soustack.org/lite.schema.json',
@@ -234,7 +367,7 @@ function transformToSoustackRecipe(
     description: parsed.description ? String(parsed.description) : undefined,
     servings: parsed.servings ? String(parsed.servings) : undefined,
     miseEnPlace: Array.isArray(parsed.miseEnPlace) ? parsed.miseEnPlace : undefined,
-    ingredients: Array.isArray(parsed.ingredients) ? parsed.ingredients : [],
+    ingredients: fixedIngredients,
     instructions: Array.isArray(parsed.instructions) ? parsed.instructions : [],
     storage: parsed.storage as SoustackLiteRecipe['storage'],
     'x-mise': {
