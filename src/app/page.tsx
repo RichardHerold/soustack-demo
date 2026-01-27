@@ -5,11 +5,11 @@ import Image from 'next/image';
 import RecipeCard from '@/components/RecipeCard';
 import { normalizeToDisplay } from '@/lib/normalize';
 import { EXAMPLE_RECIPES, EXAMPLE_TEXT } from '@/lib/examples';
-import type { SoustackLiteRecipe } from '@/lib/types';
+import type { SoustackRecipe } from '@/lib/types';
 
 export default function Home() {
   const [input, setInput] = useState('');
-  const [recipe, setRecipe] = useState<SoustackLiteRecipe | null>(null);
+  const [recipe, setRecipe] = useState<SoustackRecipe | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);

@@ -3,7 +3,7 @@
  * 
  * POST /api/convert
  * Body: { text: string } - Recipe text or URL
- * Returns: { recipe: SoustackLiteRecipe }
+ * Returns: { recipe: SoustackRecipe }
  * 
  * This route:
  * 1. Detects URLs and fetches content (prioritizing JSON-LD schema.org)
@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { SoustackLiteRecipe, Ingredient, Instruction } from '@/lib/types';
+import type { SoustackRecipe, Ingredient, Instruction } from '@/lib/types';
 
 // ============================================================================
 // Configuration
@@ -365,7 +365,7 @@ interface RawInstruction {
 function transformToSoustackRecipe(
   parsed: Record<string, unknown>,
   originalText: string
-): SoustackLiteRecipe {
+): SoustackRecipe {
   const now = new Date().toISOString();
 
   // Parse yield from servings string
@@ -395,7 +395,7 @@ function transformToSoustackRecipe(
   // Determine profile
   const profile = (yield_ || time) ? 'base' : 'lite';
 
-  const recipe: SoustackLiteRecipe = {
+  const recipe: SoustackRecipe = {
     $schema: 'https://spec.soustack.org/soustack.schema.json',
     profile,
     stacks,
