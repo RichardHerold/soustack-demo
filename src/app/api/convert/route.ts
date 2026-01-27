@@ -1,351 +1,365 @@
+/**
+ * Soustack Recipe Conversion API
+ * 
+ * POST /api/convert
+ * Body: { text: string } - Recipe text or URL
+ * Returns: { recipe: SoustackLiteRecipe }
+ * 
+ * This route:
+ * 1. Detects URLs and fetches content (prioritizing JSON-LD schema.org)
+ * 2. Sends text to Gemini with optimized prompt
+ * 3. Post-processes AI output into spec-compliant Soustack format
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { SoustackLiteRecipe } from '@/lib/types';
 
+// ============================================================================
+// Configuration
+// ============================================================================
+
+const GEMINI_MODEL = 'gemini-2.0-flash';
+const MAX_TEXT_LENGTH = 8000;
+
 function getGeminiModel() {
   const apiKey = process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) {
-    throw new Error('GOOGLE_AI_API_KEY not configured');
+    throw new Error('GOOGLE_AI_API_KEY is not defined');
   }
   const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+  return genAI.getGenerativeModel({ model: GEMINI_MODEL });
 }
+
+// ============================================================================
+// System Prompt
+// ============================================================================
+
+const SYSTEM_PROMPT = `You are a recipe parser. Convert recipe text to structured JSON.
+
+## Output Format
+
+Return ONLY valid JSON. No markdown fences. No explanation.
+
+{
+  "name": "Recipe Name",
+  "description": "Optional description",
+  "servings": "4 servings" | "Makes 24 cookies" | null,
+  "totalTime": "45 minutes" | "1 hour 30 minutes" | null,
+  "miseEnPlace": ["task 1", "task 2"],
+  "ingredients": [...],
+  "instructions": [...],
+  "storage": { "refrigerated": "3-4 days", "frozen": "up to 3 months" } | null
+}
+
+## Ingredient Rules
+
+Each ingredient is either a string OR structured object:
+
+### String (when minimal info):
+"fresh herbs for garnish"
+"salt and pepper to taste"
+
+### Object (when parseable):
+{
+  "name": "all-purpose flour",
+  "quantity": 2.5,
+  "unit": "cups",
+  "prep": "sifted",
+  "notes": "room temperature",
+  "toTaste": false
+}
+
+### Quantity Parsing
+
+| Input | quantity | unit |
+|-------|----------|------|
+| "2 cups" | 2 | "cups" |
+| "1/2 cup" | 0.5 | "cup" |
+| "1 1/2 tbsp" | 1.5 | "tbsp" |
+| "2-3 cloves" | 2.5 | "cloves" |
+| "500g" | 500 | "g" |
+| "2 large eggs" | 2 | "large" + name:"eggs" |
+| "pinch of" | 1 | "pinch" |
+| "to taste" | null | null + toTaste:true |
+
+### Prep Extraction
+
+Extract these from ingredient text into "prep" field:
+diced, minced, chopped, sliced, julienned, cubed, shredded, grated, crushed, softened, melted, beaten, sifted, toasted, peeled, deveined, trimmed, halved, quartered
+
+### Notes Extraction
+
+Extract into "notes" field:
+- Temperature: "room temperature", "cold", "chilled"
+- Quality: "high-quality", "fresh"
+- Optional: "optional", "for garnish", "for serving"
+
+## Instruction Rules
+
+Each instruction is either a string OR structured object:
+
+### String (minimal):
+"Preheat oven to 350°F"
+
+### Object (when timing/temperature present):
+{
+  "text": "Sauté onions until translucent",
+  "timing": {
+    "minutes": 10,
+    "minMinutes": 8,
+    "maxMinutes": 10,
+    "activity": "active" | "passive",
+    "completionCue": "until translucent"
+  },
+  "temperature": {
+    "value": 350,
+    "unit": "F" | "C",
+    "level": "low" | "medium" | "medium-high" | "high"
+  }
+}
+
+### Timing Extraction
+
+| Pattern | Result |
+|---------|--------|
+| "cook 10 minutes" | { minutes: 10, activity: "active" } |
+| "bake 25-30 min" | { minMinutes: 25, maxMinutes: 30, activity: "passive" } |
+| "let rest 1 hour" | { minutes: 60, activity: "passive" } |
+| "until golden" | { completionCue: "until golden" } |
+| "simmer 20 min until thick" | { minutes: 20, completionCue: "until thick", activity: "active" } |
+| "refrigerate overnight" | { minutes: 480, activity: "passive" } |
+| "let rise 1-2 hours" | { minMinutes: 60, maxMinutes: 120, activity: "passive" } |
+
+### Activity Types
+
+**active** = requires attention: sauté, stir, whisk, knead, flip, fry, chop, mix, beat, fold
+**passive** = unattended: bake, roast, simmer, rest, rise, chill, marinate, freeze, refrigerate, cool
+
+### Temperature Extraction
+
+| Pattern | Result |
+|---------|--------|
+| "350°F" | { value: 350, unit: "F" } |
+| "180°C" | { value: 180, unit: "C" } |
+| "medium heat" | { level: "medium" } |
+| "high heat" | { level: "high" } |
+| "medium-high" | { level: "medium-high" } |
+
+## Mise en Place
+
+Extract pre-cooking tasks. Look for:
+- "Before you begin" sections
+- Room temperature requirements
+- Prep instructions that happen BEFORE cooking
+- Equipment preparation (preheat oven counts)
+
+Examples:
+- "Bring butter to room temperature"
+- "Preheat oven to 350°F"
+- "Dice all vegetables"
+- "Measure out spices"
+
+## Storage
+
+If storage/shelf life info is mentioned:
+{
+  "storage": {
+    "refrigerated": "3-4 days",
+    "frozen": "up to 3 months",
+    "roomTemp": "2 hours"
+  }
+}
+
+## Critical Rules
+
+1. Use numbers for quantities: 2 not "2"
+2. Use null (not empty string) for missing optional fields
+3. Extract prep verbs from ingredient text
+4. Separate mise en place from cooking instructions
+5. Include timing even when only completion cue exists
+6. Output ONLY JSON - no text before or after`;
 
 function createConvertPrompt(text: string): string {
-  return `You are a recipe parser. Convert this recipe into structured JSON.
+  return `${SYSTEM_PROMPT}
 
-INPUT:
+Parse this recipe:
+
+"""
 ${text}
-
-OUTPUT FORMAT (JSON only, no markdown):
-{
-  "name": "Recipe Title",
-  "description": "Brief description",
-  "servings": "4 servings",
-  "miseEnPlace": [
-    { "text": "Prep task before cooking (e.g., 'Mince the garlic', 'Pat chicken dry', 'Preheat oven to 400°F')" }
-  ],
-  "ingredients": [
-    { "name": "ingredient name", "quantity": 2, "unit": "cups", "notes": "optional notes" },
-    { "name": "salt", "toTaste": true },
-    { "name": "pepper", "toTaste": true },
-    { "name": "apples", "quantity": 5, "toTaste": true }
-  ],
-  "instructions": [
-    { "text": "Step description", "timing": { "duration": { "minutes": 10 }, "activity": "active" } },
-    { "text": "Let rest", "timing": { "duration": { "minutes": 5 }, "activity": "passive", "completionCue": "until cool" } }
-  ],
-  "storage": {
-    "refrigerated": { "duration": { "iso8601": "P3D" }, "notes": "in airtight container" }
-  }
+"""`;
 }
 
-IMPORTANT RULES:
-- miseEnPlace: Extract ALL prep tasks that should happen BEFORE cooking starts:
-  * Preheating (oven, grill, pan)
-  * Chopping, dicing, mincing vegetables
-  * Measuring out spices
-  * Bringing ingredients to room temperature
-  * Marinating
-  * Toasting nuts/spices
-  * Any "meanwhile, prepare..." tasks
-- Parse quantities as numbers when possible (1.5, not "1 1/2")
-- CRITICAL - "to taste" handling: When an ingredient mentions "to taste" in ANY form, set "toTaste": true and DO NOT include "to taste" in the name or notes fields:
-  * "salt to taste" → { "name": "salt", "toTaste": true }
-  * "pepper to taste" → { "name": "pepper", "toTaste": true }
-  * "flaky sea salt to taste" → { "name": "flaky sea salt", "toTaste": true }
-  * "kosher salt to taste" → { "name": "kosher salt", "toTaste": true }
-  * "Maldon salt to taste" → { "name": "Maldon salt", "toTaste": true }
-  * "black pepper to taste" → { "name": "black pepper", "toTaste": true }
-  * "salt and pepper to taste" → { "name": "salt", "toTaste": true }, { "name": "pepper", "toTaste": true }
-  * "5 apples, or more to taste" → { "name": "apples", "quantity": 5, "toTaste": true }
-  * "season to taste" in instructions → infer which ingredients (usually salt, pepper, or specific salt/pepper types) and set toTaste: true
-  * Look for patterns: "to taste", "to taste,", ", to taste", "or more to taste", "season to taste"
-  * IMPORTANT: Preserve descriptive names (e.g., "flaky sea salt", "kosher salt") but remove "to taste" from them
-- Identify passive vs active time:
-  * active = hands-on cooking (sautéing, stirring)
-  * passive = waiting (baking, marinating, resting, simmering unattended)
-- Only include storage if the recipe mentions how long it keeps
-- Return ONLY valid JSON, no explanation or markdown fences`;
-}
-
-function stripMarkdownFences(text: string): string {
-  return text
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-}
+// ============================================================================
+// URL Fetching
+// ============================================================================
 
 async function maybeFetchUrl(text: string): Promise<string> {
-  const trimmed = text.trim();
-  
   // Check if it looks like a URL
-  if (!trimmed.match(/^https?:\/\/[^\s]+$/i)) {
-    return trimmed;
+  const urlPattern = /^https?:\/\//i;
+  if (!urlPattern.test(text.trim())) {
+    return text;
   }
-  
+
   try {
-    const res = await fetch(trimmed, {
+    const response = await fetch(text.trim(), {
       headers: {
-        'User-Agent': 'Soustack/1.0 (Recipe Converter)',
-        'Accept': 'text/html,text/plain',
+        'User-Agent': 'Mozilla/5.0 (compatible; SoustackBot/1.0)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
-      redirect: 'follow',
     });
-    
-    if (!res.ok) return trimmed;
-    
-    const html = await res.text();
-    
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch URL: ${response.status}`);
+    }
+
+    const html = await response.text();
+
     // Try to extract JSON-LD structured data first (schema.org Recipe)
-    const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-    let jsonLdMatch;
-    while ((jsonLdMatch = jsonLdRegex.exec(html)) !== null) {
-      const jsonContent = jsonLdMatch[1].trim();
-      
-      try {
-        const data = JSON.parse(jsonContent);
-        
-        // Helper to check if an item is a Recipe type
-        const isRecipe = (item: any): boolean => {
-          if (!item) return false;
-          const type = item['@type'] || item.type;
-          if (!type) return false;
-          // Handle both string and array formats
-          if (Array.isArray(type)) {
-            return type.includes('Recipe');
-          }
-          return type === 'Recipe';
-        };
-        
-        // Handle both single objects and arrays
-        const recipes = Array.isArray(data) 
-          ? data.filter(isRecipe)
-          : (isRecipe(data) ? [data] : []);
-        
-        if (recipes.length > 0) {
-          const recipe = recipes[0];
-          // Convert structured data to readable text format
-          const parts: string[] = [];
-          
-          if (recipe.name) parts.push(recipe.name);
-          if (recipe.description) parts.push(recipe.description);
-          if (recipe.recipeYield) parts.push(`Serves: ${recipe.recipeYield}`);
-          if (recipe.prepTime) parts.push(`Prep time: ${recipe.prepTime}`);
-          if (recipe.cookTime) parts.push(`Cook time: ${recipe.cookTime}`);
-          if (recipe.totalTime) parts.push(`Total time: ${recipe.totalTime}`);
-          
-          if (recipe.recipeIngredient && Array.isArray(recipe.recipeIngredient)) {
-            parts.push('\nIngredients:');
-            recipe.recipeIngredient.forEach((ing: string) => {
-              parts.push(`- ${ing}`);
-            });
-          }
-          
-          if (recipe.recipeInstructions) {
-            parts.push('\nInstructions:');
-            const instructions = Array.isArray(recipe.recipeInstructions)
-              ? recipe.recipeInstructions
-              : [recipe.recipeInstructions];
-            
-            instructions.forEach((inst: any, idx: number) => {
-              if (typeof inst === 'string') {
-                parts.push(`${idx + 1}. ${inst}`);
-              } else if (inst.text) {
-                parts.push(`${idx + 1}. ${inst.text}`);
-              } else if (inst['@type'] === 'HowToStep' && inst.text) {
-                parts.push(`${idx + 1}. ${inst.text}`);
+    try {
+      const jsonLdMatch = html.match(
+        /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+      );
+
+      if (jsonLdMatch) {
+        for (const match of jsonLdMatch) {
+          const jsonContent = match.replace(
+            /<script[^>]*>|<\/script>/gi,
+            ''
+          );
+
+          try {
+            const data = JSON.parse(jsonContent);
+
+            // Helper to check if an item is a Recipe type
+            const isRecipe = (item: any): boolean =>
+              item?.['@type'] === 'Recipe' ||
+              (Array.isArray(item?.['@type']) && item['@type'].includes('Recipe'));
+
+            // Handle @graph format (common in modern sites)
+            let recipe = null;
+            if (data['@graph']) {
+              recipe = data['@graph'].find(isRecipe);
+            } else if (Array.isArray(data)) {
+              recipe = data.find(isRecipe);
+            } else if (isRecipe(data)) {
+              recipe = data;
+            }
+
+            if (recipe) {
+              // Convert structured data to readable text format
+              const parts = [];
+
+              if (recipe.name) parts.push(recipe.name);
+              if (recipe.description) parts.push(recipe.description);
+
+              // Handle servings
+              if (recipe.recipeYield) {
+                const yieldStr = Array.isArray(recipe.recipeYield)
+                  ? recipe.recipeYield[0]
+                  : recipe.recipeYield;
+                parts.push(`Serves: ${yieldStr}`);
               }
-            });
+
+              // Handle times
+              const times = [];
+              if (recipe.prepTime) times.push(`Prep: ${formatISODuration(recipe.prepTime)}`);
+              if (recipe.cookTime) times.push(`Cook: ${formatISODuration(recipe.cookTime)}`);
+              if (recipe.totalTime) times.push(`Total: ${formatISODuration(recipe.totalTime)}`);
+              if (times.length) parts.push(times.join(' | '));
+
+              // Ingredients
+              if (recipe.recipeIngredient?.length) {
+                parts.push('\nIngredients:');
+                for (const ing of recipe.recipeIngredient) {
+                  parts.push(`- ${ing}`);
+                }
+              }
+
+              // Instructions
+              if (recipe.recipeInstructions?.length) {
+                parts.push('\nInstructions:');
+                for (let i = 0; i < recipe.recipeInstructions.length; i++) {
+                  const inst = recipe.recipeInstructions[i];
+                  const text = typeof inst === 'string' ? inst : inst.text || inst.name;
+                  if (text) parts.push(`${i + 1}. ${text}`);
+                }
+              }
+
+              const recipeText = parts.join('\n');
+              return recipeText.slice(0, MAX_TEXT_LENGTH);
+            }
+          } catch {
+            // Continue to next JSON-LD block
           }
-          
-          const structuredText = parts.join('\n');
-          // Truncate to ~8000 chars to stay within token limits
-          return structuredText.slice(0, 8000);
-        }
-      } catch {
-        // If JSON parsing fails, continue to fallback methods
-        continue;
-      }
-    }
-    
-    // Fallback: Try to find main content area
-    // Look for common recipe content selectors
-    const contentSelectors = [
-      /<article[^>]*>([\s\S]*?)<\/article>/i,
-      /<main[^>]*>([\s\S]*?)<\/main>/i,
-      /<div[^>]*class=["'][^"']*recipe[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
-      /<div[^>]*id=["'][^"']*recipe[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
-      /<div[^>]*class=["'][^"']*content[^"']*["'][^>]*>([\s\S]*?)<\/div>/i,
-    ];
-    
-    for (const selector of contentSelectors) {
-      const match = html.match(selector);
-      if (match && match[1]) {
-        const content = match[1];
-        // Remove scripts, styles, and other non-content elements
-        const textContent = content
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-          .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-          .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-          .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-          .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/&nbsp;/g, ' ')
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/\s+/g, ' ')
-          .trim();
-        
-        if (textContent.length > 200) {
-          // Truncate to ~8000 chars to stay within token limits
-          return textContent.slice(0, 8000);
         }
       }
+    } catch {
+      // If JSON-LD parsing fails, continue to fallback
     }
-    
-    // Final fallback: Extract text content from entire page, strip HTML tags
+
+    // Fallback: extract text content
     const textContent = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-      .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+      .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+      .replace(/<header[\s\S]*?<\/header>/gi, '')
+      .replace(/<aside[\s\S]*?<\/aside>/gi, '')
       .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
       .replace(/\s+/g, ' ')
       .trim();
-    
-    // Truncate to ~8000 chars to stay within token limits
-    return textContent.slice(0, 8000);
-  } catch {
-    return trimmed;
+
+    return textContent.slice(0, MAX_TEXT_LENGTH);
+  } catch (error) {
+    console.error('URL fetch error:', error);
+    throw new Error('Failed to fetch recipe from URL');
   }
 }
 
-function fixToTasteIngredients(ingredients: unknown[]): unknown[] {
-  if (!Array.isArray(ingredients)) return ingredients;
+/**
+ * Format ISO 8601 duration to readable string
+ */
+function formatISODuration(iso: string): string {
+  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+  if (!match) return iso;
   
-  const result: unknown[] = [];
+  const hours = match[1] ? parseInt(match[1]) : 0;
+  const minutes = match[2] ? parseInt(match[2]) : 0;
   
-  for (const ing of ingredients) {
-    // Handle string ingredients that might contain "to taste"
-    if (typeof ing === 'string') {
-      const toTastePattern = /\b(to taste|to taste,|, to taste)\b/i;
-      if (toTastePattern.test(ing)) {
-        // Try to parse the string into a structured ingredient
-        // Pattern: "flaky sea salt to taste" or "salt and pepper to taste"
-        const andPattern = /^(.*?)\s+and\s+(.*?)\s+to\s+taste$/i;
-        const andMatch = ing.match(andPattern);
-        
-        if (andMatch) {
-          // Split into two ingredients
-          result.push({ name: andMatch[1].trim(), toTaste: true });
-          result.push({ name: andMatch[2].trim(), toTaste: true });
-          continue;
-        }
-        
-        // Pattern: "X to taste" where X could be "flaky sea salt", "kosher salt", etc.
-        const singlePattern = /^(.+?)\s+to\s+taste$/i;
-        const singleMatch = ing.match(singlePattern);
-        
-        if (singleMatch) {
-          const name = singleMatch[1].trim();
-          result.push({ name, toTaste: true });
-          continue;
-        }
-      }
-      // If no "to taste" pattern, keep as string
-      result.push(ing);
-      continue;
-    }
-    
-    // Handle object ingredients
-    if (typeof ing !== 'object' || ing === null) {
-      result.push(ing);
-      continue;
-    }
-    
-    // Check if "to taste" appears in notes
-    if (typeof ing === 'object' && 'notes' in ing && typeof ing.notes === 'string') {
-      const toTastePattern = /\b(to taste|to taste,|, to taste|or more to taste)\b/i;
-      if (toTastePattern.test(ing.notes)) {
-        // Remove "to taste" patterns from notes
-        const cleanedNotes = ing.notes
-          .replace(/\b(to taste|to taste,|, to taste)\b/gi, '')
-          .replace(/\bor more to taste\b/gi, '')
-          .replace(/,\s*,/g, ',') // Fix double commas
-          .replace(/^\s*,\s*|\s*,\s*$/g, '') // Remove leading/trailing commas
-          .trim();
-        
-        result.push({
-          ...ing,
-          toTaste: true,
-          notes: cleanedNotes || undefined,
-        });
-        continue;
-      }
-    }
-    
-    // Check if "to taste" appears in name
-    if ('name' in ing && typeof ing.name === 'string') {
-      const name = ing.name;
-      const toTastePattern = /\b(to taste|to taste,|, to taste)\b/i;
-      
-      // Check for compound ingredients like "salt and pepper to taste"
-      const andPattern = /^(.*?)\s+and\s+(.*?)\s+to\s+taste$/i;
-      const andMatch = name.match(andPattern);
-      
-      if (andMatch) {
-        // Split into two ingredients: salt and pepper
-        const firstIng = andMatch[1].trim();
-        const secondIng = andMatch[2].trim();
-        
-        // Create two separate ingredients with toTaste: true
-        result.push({
-          ...ing,
-          name: firstIng,
-          toTaste: true,
-        });
-        result.push({
-          ...ing,
-          name: secondIng,
-          toTaste: true,
-        });
-        continue;
-      }
-      
-      if (toTastePattern.test(name)) {
-        // Remove "to taste" patterns from name, preserving the rest
-        const cleanedName = name
-          .replace(/\b(to taste|to taste,|, to taste)\b/gi, '')
-          .replace(/\s+/g, ' ') // Normalize whitespace
-          .trim();
-        
-        result.push({
-          ...ing,
-          name: cleanedName,
-          toTaste: true,
-        });
-        continue;
-      }
-    }
-    
-    result.push(ing);
-  }
-  
-  return result;
+  if (hours && minutes) return `${hours}h ${minutes}m`;
+  if (hours) return `${hours} hour${hours > 1 ? 's' : ''}`;
+  if (minutes) return `${minutes} minutes`;
+  return iso;
+}
+
+// ============================================================================
+// Post-Processing: Transform AI output to Soustack format
+// ============================================================================
+
+interface RawIngredient {
+  name: string;
+  quantity?: number | null;
+  unit?: string | null;
+  prep?: string;
+  notes?: string;
+  toTaste?: boolean;
+}
+
+interface RawInstruction {
+  text: string;
+  timing?: {
+    minutes?: number;
+    minMinutes?: number;
+    maxMinutes?: number;
+    activity?: 'active' | 'passive';
+    completionCue?: string;
+  };
+  temperature?: {
+    value?: number;
+    unit?: 'F' | 'C';
+    level?: string;
+  };
 }
 
 function transformToSoustackRecipe(
@@ -353,168 +367,360 @@ function transformToSoustackRecipe(
   originalText: string
 ): SoustackLiteRecipe {
   const now = new Date().toISOString();
-  
-  // Fix ingredients where "to taste" might be in notes or name
-  const fixedIngredients = fixToTasteIngredients(
-    Array.isArray(parsed.ingredients) ? parsed.ingredients : []
-  );
-  
-  return {
-    $schema: 'https://soustack.org/lite.schema.json',
-    profile: 'lite',
-    stacks: inferStacks(parsed),
-    name: String(parsed.name || 'Untitled Recipe'),
-    description: parsed.description ? String(parsed.description) : undefined,
-    servings: parsed.servings ? String(parsed.servings) : undefined,
-    miseEnPlace: Array.isArray(parsed.miseEnPlace) ? parsed.miseEnPlace : undefined,
-    ingredients: fixedIngredients,
-    instructions: Array.isArray(parsed.instructions) ? parsed.instructions : [],
-    storage: parsed.storage as SoustackLiteRecipe['storage'],
-    'x-mise': {
+
+  // Parse yield from servings string
+  const yield_ = parseYield(parsed.servings as string | null | undefined);
+
+  // Parse time
+  const time = parseTime(parsed.totalTime as string | null | undefined);
+
+  // Transform ingredients
+  const rawIngredients = (parsed.ingredients || []) as Array<string | RawIngredient>;
+  const ingredients = transformIngredients(rawIngredients);
+
+  // Transform instructions
+  const rawInstructions = (parsed.instructions || []) as Array<string | RawInstruction>;
+  const instructions = transformInstructions(rawInstructions);
+
+  // Transform mise en place
+  const rawMise = parsed.miseEnPlace as string[] | undefined;
+  const miseEnPlace = rawMise?.length ? rawMise.map(text => ({ text })) : undefined;
+
+  // Transform storage
+  const storage = transformStorage(parsed.storage as Record<string, string> | null | undefined);
+
+  // Infer stacks based on content
+  const stacks = inferStacks(ingredients, instructions, miseEnPlace, storage);
+
+  // Determine profile
+  const profile = (yield_ || time) ? 'base' : 'lite';
+
+  const recipe: SoustackLiteRecipe = {
+    $schema: 'https://spec.soustack.org/soustack.schema.json',
+    profile,
+    stacks,
+    name: (parsed.name as string) || 'Untitled Recipe',
+    ingredients,
+    instructions,
+    'x-soustack': {
       source: {
         text: originalText.slice(0, 500),
-        intent: 'convert',
         convertedAt: now,
-        converter: 'gemini-2.0-flash-lite',
+        converter: GEMINI_MODEL,
       },
     },
   };
+
+  // Add optional fields only if present
+  if (parsed.description) recipe.description = parsed.description as string;
+  if (yield_) recipe.yield = yield_;
+  if (time) recipe.time = { total: time };
+  if (miseEnPlace) recipe.miseEnPlace = miseEnPlace;
+  if (storage) recipe.storage = storage;
+
+  return recipe;
 }
 
-function inferStacks(parsed: Record<string, unknown>): Record<string, number> {
+function parseYield(servings?: string | null): { amount: number; unit: string } | undefined {
+  if (!servings) return undefined;
+
+  const patterns = [
+    /^(?:makes\s+)?(\d+(?:-\d+)?)\s+(.+)$/i,
+    /^serves?\s+(\d+(?:-\d+)?)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = servings.match(pattern);
+    if (match) {
+      const amountStr = match[1];
+      const unit = match[2] || 'servings';
+
+      let amount: number;
+      if (amountStr.includes('-')) {
+        const [min, max] = amountStr.split('-').map(Number);
+        amount = (min + max) / 2;
+      } else {
+        amount = Number(amountStr);
+      }
+
+      if (!isNaN(amount) && amount > 0) {
+        return { amount, unit: unit.toLowerCase() };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function parseTime(timeStr?: string | null): { minutes: number } | undefined {
+  if (!timeStr) return undefined;
+
+  let totalMinutes = 0;
+
+  const hourMatch = timeStr.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)/i);
+  if (hourMatch) totalMinutes += parseFloat(hourMatch[1]) * 60;
+
+  const minMatch = timeStr.match(/(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)(?!\w)/i);
+  if (minMatch) totalMinutes += parseFloat(minMatch[1]);
+
+  return totalMinutes > 0 ? { minutes: Math.round(totalMinutes) } : undefined;
+}
+
+function transformIngredients(ingredients: Array<string | RawIngredient>): unknown[] {
+  let idCounter = 1;
+
+  return ingredients.flatMap(ing => {
+    if (typeof ing === 'string') {
+      // Check for "to taste" in string
+      if (/to\s*taste/i.test(ing)) {
+        return handleToTasteString(ing, () => `ing-${idCounter++}`);
+      }
+      return ing;
+    }
+
+    const result: Record<string, unknown> = {
+      id: `ing-${idCounter++}`,
+      name: ing.name,
+    };
+
+    if (ing.quantity != null && ing.unit) {
+      result.quantity = { amount: ing.quantity, unit: ing.unit };
+    }
+
+    if (ing.prep) result.prep = ing.prep;
+    if (ing.notes && !/^to\s*taste$/i.test(ing.notes)) result.notes = ing.notes;
+    if (ing.toTaste) result.scaling = { mode: 'toTaste' };
+
+    return result;
+  });
+}
+
+function handleToTasteString(str: string, genId: () => string): unknown[] {
+  // "salt and pepper to taste"
+  const compoundMatch = str.match(/^(.+?)\s+and\s+(.+?)\s+to\s*taste$/i);
+  if (compoundMatch) {
+    return [
+      { id: genId(), name: compoundMatch[1].trim(), scaling: { mode: 'toTaste' } },
+      { id: genId(), name: compoundMatch[2].trim(), scaling: { mode: 'toTaste' } },
+    ];
+  }
+
+  // "X to taste"
+  const singleMatch = str.match(/^(.+?)\s+to\s*taste$/i);
+  if (singleMatch) {
+    return [{ id: genId(), name: singleMatch[1].trim(), scaling: { mode: 'toTaste' } }];
+  }
+
+  return [str];
+}
+
+function transformInstructions(instructions: Array<string | RawInstruction>): unknown[] {
+  let idCounter = 1;
+
+  return instructions.map(inst => {
+    if (typeof inst === 'string') return inst;
+
+    const result: Record<string, unknown> = {
+      id: `step-${idCounter++}`,
+      text: inst.text,
+    };
+
+    if (inst.timing) {
+      const timing: Record<string, unknown> = {};
+      if (inst.timing.activity) timing.activity = inst.timing.activity;
+      if (inst.timing.minMinutes != null && inst.timing.maxMinutes != null) {
+        timing.duration = { minMinutes: inst.timing.minMinutes, maxMinutes: inst.timing.maxMinutes };
+      } else if (inst.timing.minutes != null) {
+        timing.duration = { minutes: inst.timing.minutes };
+      }
+      if (inst.timing.completionCue) timing.completionCue = inst.timing.completionCue;
+      if (Object.keys(timing).length) result.timing = timing;
+    }
+
+    if (inst.temperature) {
+      const temp: Record<string, unknown> = { target: inst.temperature.value ? 'oven' : 'stovetop' };
+      if (inst.temperature.value) {
+        temp.value = inst.temperature.value;
+        temp.unit = inst.temperature.unit === 'C' ? 'celsius' : 'fahrenheit';
+      }
+      if (inst.temperature.level) {
+        const levelMap: Record<string, string> = {
+          'low': 'low', 'medium-low': 'low', 'medium': 'medium',
+          'medium-high': 'mediumHigh', 'high': 'high',
+        };
+        temp.level = levelMap[inst.temperature.level.toLowerCase()] || inst.temperature.level;
+      }
+      result.temperature = temp;
+    }
+
+    return result;
+  });
+}
+
+function transformStorage(storage?: Record<string, string> | null): Record<string, unknown> | undefined {
+  if (!storage) return undefined;
+
+  const result: Record<string, unknown> = {};
+
+  if (storage.refrigerated) {
+    result.refrigerated = { duration: parseDurationToISO(storage.refrigerated), notes: storage.refrigerated };
+  }
+  if (storage.frozen) {
+    result.frozen = { duration: parseDurationToISO(storage.frozen), notes: storage.frozen };
+  }
+  if (storage.roomTemp) {
+    result.roomTemp = { duration: parseDurationToISO(storage.roomTemp), notes: storage.roomTemp };
+  }
+
+  return Object.keys(result).length ? result : undefined;
+}
+
+function parseDurationToISO(str: string): { iso8601: string } {
+  const dayMatch = str.match(/(\d+)(?:-\d+)?\s*days?/i);
+  if (dayMatch) return { iso8601: `P${dayMatch[1]}D` };
+
+  const monthMatch = str.match(/(\d+)(?:-\d+)?\s*months?/i);
+  if (monthMatch) return { iso8601: `P${monthMatch[1]}M` };
+
+  const weekMatch = str.match(/(\d+)(?:-\d+)?\s*weeks?/i);
+  if (weekMatch) return { iso8601: `P${parseInt(weekMatch[1]) * 7}D` };
+
+  const hourMatch = str.match(/(\d+)(?:-\d+)?\s*hours?/i);
+  if (hourMatch) return { iso8601: `PT${hourMatch[1]}H` };
+
+  return { iso8601: 'P1D' };
+}
+
+function inferStacks(
+  ingredients: unknown[],
+  instructions: unknown[],
+  miseEnPlace?: Array<{ text: string }>,
+  storage?: Record<string, unknown>
+): Record<string, number> {
   const stacks: Record<string, number> = {};
-  
-  // Check for timing in instructions
-  const instructions = parsed.instructions;
-  if (Array.isArray(instructions)) {
-    const hasTiming = instructions.some(
-      (i) => typeof i === 'object' && i !== null && 'timing' in i
-    );
-    if (hasTiming) stacks.timed = 1;
-  }
-  
-  // Check for structured ingredients (scalable)
-  const ingredients = parsed.ingredients;
-  if (Array.isArray(ingredients)) {
-    const hasQuantity = ingredients.some(
-      (i) => typeof i === 'object' && i !== null && 'quantity' in i
-    );
-    if (hasQuantity) stacks.scaling = 1;
-  }
-  
-  // Check for mise en place
-  if (Array.isArray(parsed.miseEnPlace) && parsed.miseEnPlace.length > 0) {
-    stacks.prep = 1;
-  }
-  
-  // Check for storage
-  if (parsed.storage && typeof parsed.storage === 'object') {
-    stacks.storage = 1;
-  }
-  
+
+  const hasQuantified = ingredients.some(
+    ing => typeof ing === 'object' && ing !== null && 'quantity' in ing && 'id' in ing
+  );
+  if (hasQuantified) stacks.quantified = 1;
+
+  const hasStructured = instructions.some(
+    inst => typeof inst === 'object' && inst !== null && 'id' in inst
+  );
+  if (hasStructured) stacks.structured = 1;
+
+  const hasTimed = instructions.some(
+    inst => typeof inst === 'object' && inst !== null && 'timing' in inst
+  );
+  if (hasTimed && hasStructured) stacks.timed = 1;
+
+  if (miseEnPlace?.length) stacks.prep = 1;
+  if (storage && Object.keys(storage).length) stacks.storage = 1;
+
   return stacks;
 }
 
-function parseRateLimitError(error: unknown): { isRateLimit: boolean; retryAfter?: number; message: string } {
-  if (!(error instanceof Error)) {
-    return { isRateLimit: false, message: 'Unknown error' };
-  }
-  
-  const message = error.message || '';
-  
-  // Check for 429 rate limit errors
-  if (message.includes('429') || message.toLowerCase().includes('rate limit')) {
-    // Try to extract retry delay
-    const retryMatch = message.match(/retry after (\d+)/i) || message.match(/(\d+) seconds/i);
-    const retryAfter = retryMatch ? parseInt(retryMatch[1], 10) : 60;
-    
-    return {
-      isRateLimit: true,
-      retryAfter,
-      message: `Rate limited. Please try again in ${retryAfter} seconds.`,
-    };
-  }
-  
-  // Check for quota exceeded
-  if (message.toLowerCase().includes('quota')) {
-    return {
-      isRateLimit: true,
-      message: 'API quota exceeded. Please try again later.',
-    };
-  }
-  
-  return { isRateLimit: false, message: error.message };
+function stripMarkdownFences(text: string): string {
+  return text
+    .replace(/^```json\n?/i, '')
+    .replace(/^```\n?/i, '')
+    .replace(/\n?```$/i, '')
+    .trim();
 }
+
+// ============================================================================
+// Error Handling
+// ============================================================================
+
+function parseRateLimitError(error: unknown): { isRateLimit: boolean; retryAfter?: number; message: string } {
+  if (error instanceof Error) {
+    const message = error.message;
+
+    if (message.includes('429') || message.includes('Too Many Requests')) {
+      const retryMatch = message.match(/retry.+?(\d+)/i);
+      return {
+        isRateLimit: true,
+        retryAfter: retryMatch ? parseInt(retryMatch[1]) : 60,
+        message: 'Rate limit exceeded. Please wait a moment and try again.',
+      };
+    }
+
+    if (message.includes('quota') || message.includes('exceeded')) {
+      return {
+        isRateLimit: true,
+        message: 'API quota exceeded. Please try again later.',
+      };
+    }
+  }
+
+  return { isRateLimit: false, message: 'Unknown error' };
+}
+
+// ============================================================================
+// API Handler
+// ============================================================================
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { text } = body;
-    
+
     if (!text || typeof text !== 'string') {
       return NextResponse.json(
-        { error: 'Missing or invalid "text" field' },
+        { error: 'Missing or invalid text field' },
         { status: 400 }
       );
     }
-    
+
     // If it looks like a URL, fetch it first
-    const inputText = await maybeFetchUrl(text);
-    
+    const recipeText = await maybeFetchUrl(text);
+
     // Get Gemini model
     const model = getGeminiModel();
-    
+
     // Create prompt and call Gemini
-    const prompt = createConvertPrompt(inputText);
+    const prompt = createConvertPrompt(recipeText);
     const result = await model.generateContent(prompt);
     const response = result.response;
     const responseText = response.text();
-    
+
     // Parse JSON response
     const cleanJson = stripMarkdownFences(responseText);
     let parsed: Record<string, unknown>;
-    
+
     try {
       parsed = JSON.parse(cleanJson);
     } catch {
+      console.error('JSON parse error. Raw response:', responseText);
       return NextResponse.json(
-        { error: 'Failed to parse AI response as JSON' },
+        { error: 'Failed to parse AI response as JSON', raw: cleanJson },
         { status: 500 }
       );
     }
-    
+
     // Transform to Soustack format
     const recipe = transformToSoustackRecipe(parsed, text);
-    
+
     return NextResponse.json({ recipe });
   } catch (error) {
     console.error('Convert error:', error);
-    
+
     // Check for rate limit errors
     const rateLimitInfo = parseRateLimitError(error);
     if (rateLimitInfo.isRateLimit) {
       return NextResponse.json(
-        { error: rateLimitInfo.message },
+        { error: rateLimitInfo.message, retryAfter: rateLimitInfo.retryAfter },
         { status: 429 }
       );
     }
-    
+
     if (error instanceof Error) {
       if (error.message.includes('API_KEY')) {
-        return NextResponse.json(
-          { error: 'API not configured' },
-          { status: 500 }
-        );
+        return NextResponse.json({ error: 'API not configured' }, { status: 500 });
       }
-      return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    
-    return NextResponse.json(
-      { error: 'Unknown error' },
-      { status: 500 }
-    );
+
+    return NextResponse.json({ error: 'Unknown error' }, { status: 500 });
   }
 }
