@@ -28,6 +28,10 @@ export default function Home() {
       const data = await res.json();
       
       if (!res.ok) {
+        // Handle rate limit errors with retry information
+        if (res.status === 429 && data.retryAfter) {
+          throw new Error(`${data.error} (Retry after ${data.retryAfter}s)`);
+        }
         throw new Error(data.error || 'Conversion failed');
       }
       

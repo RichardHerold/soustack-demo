@@ -157,6 +157,47 @@ function inferStacks(parsed: Record<string, unknown>): Record<string, number> {
   return stacks;
 }
 
+function parseRateLimitError(error: unknown): { isRateLimit: boolean; retryAfter?: number; message: string } {
+  if (!(error instanceof Error)) {
+    return { isRateLimit: false, message: 'Unknown error' };
+  }
+
+  const errorMessage = error.message;
+  
+  // Check for 429 rate limit errors
+  if (errorMessage.includes('429') || errorMessage.includes('Too Many Requests') || errorMessage.includes('quota')) {
+    // Try to extract retry delay from error message
+    const retryMatch = errorMessage.match(/retry in ([\d.]+)s/i) || 
+                       errorMessage.match(/retryDelay["']?\s*:\s*["']?(\d+)/i);
+    
+    let retryAfter: number | undefined;
+    if (retryMatch) {
+      retryAfter = Math.ceil(parseFloat(retryMatch[1]));
+    }
+    
+    // Check if it's a quota exceeded error
+    if (errorMessage.includes('quota') || errorMessage.includes('Quota exceeded')) {
+      return {
+        isRateLimit: true,
+        retryAfter,
+        message: retryAfter 
+          ? `API rate limit exceeded. Please try again in ${retryAfter} seconds.`
+          : 'API rate limit exceeded. You may have reached your free tier quota. Please wait a moment and try again, or check your Google AI Studio billing settings.'
+      };
+    }
+    
+    return {
+      isRateLimit: true,
+      retryAfter,
+      message: retryAfter
+        ? `API rate limit exceeded. Please try again in ${retryAfter} seconds.`
+        : 'API rate limit exceeded. Please wait a moment and try again.'
+    };
+  }
+  
+  return { isRateLimit: false, message: errorMessage };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -208,6 +249,25 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
+      
+      // Check for rate limit errors
+      const rateLimitInfo = parseRateLimitError(error);
+      if (rateLimitInfo.isRateLimit) {
+        return NextResponse.json(
+          { 
+            error: rateLimitInfo.message,
+            retryAfter: rateLimitInfo.retryAfter,
+            code: 'RATE_LIMIT'
+          },
+          { 
+            status: 429,
+            headers: rateLimitInfo.retryAfter ? {
+              'Retry-After': rateLimitInfo.retryAfter.toString()
+            } : undefined
+          }
+        );
+      }
+      
       return NextResponse.json(
         { error: error.message },
         { status: 500 }
