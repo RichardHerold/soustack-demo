@@ -23,7 +23,7 @@ OUTPUT FORMAT (JSON only, no markdown):
   "description": "Brief description",
   "servings": "4 servings",
   "miseEnPlace": [
-    { "text": "Prep task before cooking (e.g., 'Mince the garlic', 'Pat chicken dry')" }
+    { "text": "Prep task before cooking (e.g., 'Mince the garlic', 'Pat chicken dry', 'Preheat oven to 400°F')" }
   ],
   "ingredients": [
     { "name": "ingredient name", "quantity": 2, "unit": "cups", "notes": "optional notes" },
@@ -38,12 +38,21 @@ OUTPUT FORMAT (JSON only, no markdown):
   }
 }
 
-RULES:
-- Extract mise en place: prep tasks that should be done BEFORE cooking starts (chopping, measuring, preheating)
-- Parse quantities as numbers when possible
-- Identify passive vs active time (passive = waiting/resting/baking unattended)
-- Only include storage if the recipe mentions it
-- Return ONLY valid JSON, no explanation`;
+IMPORTANT RULES:
+- miseEnPlace: Extract ALL prep tasks that should happen BEFORE cooking starts:
+  * Preheating (oven, grill, pan)
+  * Chopping, dicing, mincing vegetables
+  * Measuring out spices
+  * Bringing ingredients to room temperature
+  * Marinating
+  * Toasting nuts/spices
+  * Any "meanwhile, prepare..." tasks
+- Parse quantities as numbers when possible (1.5, not "1 1/2")
+- Identify passive vs active time:
+  * active = hands-on cooking (sautéing, stirring)
+  * passive = waiting (baking, marinating, resting, simmering unattended)
+- Only include storage if the recipe mentions how long it keeps
+- Return ONLY valid JSON, no explanation or markdown fences`;
 }
 
 function stripMarkdownFences(text: string): string {
@@ -85,6 +94,7 @@ async function maybeFetchUrl(text: string): Promise<string> {
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
       .replace(/\s+/g, ' ')
       .trim();
     
@@ -161,55 +171,31 @@ function parseRateLimitError(error: unknown): { isRateLimit: boolean; retryAfter
   if (!(error instanceof Error)) {
     return { isRateLimit: false, message: 'Unknown error' };
   }
-
-  const errorMessage = error.message;
+  
+  const message = error.message || '';
   
   // Check for 429 rate limit errors
-  if (errorMessage.includes('429') || errorMessage.includes('Too Many Requests') || errorMessage.includes('quota')) {
-    // Try to extract retry delay from error message
-    const retryMatch = errorMessage.match(/retry in ([\d.]+)s/i) || 
-                       errorMessage.match(/retryDelay["']?\s*:\s*["']?(\d+)/i);
-    
-    let retryAfter: number | undefined;
-    if (retryMatch) {
-      retryAfter = Math.ceil(parseFloat(retryMatch[1]));
-    }
-    
-    // Check for daily quota issues (limit: 0 could mean exhausted OR not allocated)
-    const hasDailyQuota = errorMessage.includes('GenerateRequestsPerDay') || 
-                          errorMessage.includes('PerDay');
-    const hasLimitZero = errorMessage.includes('limit: 0');
-    
-    // If it's a daily quota with limit: 0, it could be exhausted OR not properly configured
-    if (hasDailyQuota && hasLimitZero) {
-      return {
-        isRateLimit: true,
-        retryAfter: undefined, // Don't show retry time for daily quota issues
-        message: 'API quota not available (limit: 0). This usually means: (1) Your free tier quota hasn\'t been allocated yet, (2) Your region may require billing to be enabled, or (3) Your daily limit was exhausted. Check your quota in Google AI Studio: https://aistudio.google.com/usage?timeRange=last-28-days&tab=rate-limit. If you\'re in a region that requires billing, you may need to enable Cloud Billing in your project settings.'
-      };
-    }
-    
-    // Check if it's a quota exceeded error (but not daily limit exhausted)
-    if (errorMessage.includes('quota') || errorMessage.includes('Quota exceeded')) {
-      return {
-        isRateLimit: true,
-        retryAfter,
-        message: retryAfter 
-          ? `API rate limit exceeded. Please try again in ${retryAfter} seconds.`
-          : 'API rate limit exceeded. You may have reached your free tier quota. Please wait a moment and try again, or check your Google AI Studio billing settings.'
-      };
-    }
+  if (message.includes('429') || message.toLowerCase().includes('rate limit')) {
+    // Try to extract retry delay
+    const retryMatch = message.match(/retry after (\d+)/i) || message.match(/(\d+) seconds/i);
+    const retryAfter = retryMatch ? parseInt(retryMatch[1], 10) : 60;
     
     return {
       isRateLimit: true,
       retryAfter,
-      message: retryAfter
-        ? `API rate limit exceeded. Please try again in ${retryAfter} seconds.`
-        : 'API rate limit exceeded. Please wait a moment and try again.'
+      message: `Rate limited. Please try again in ${retryAfter} seconds.`,
     };
   }
   
-  return { isRateLimit: false, message: errorMessage };
+  // Check for quota exceeded
+  if (message.toLowerCase().includes('quota')) {
+    return {
+      isRateLimit: true,
+      message: 'API quota exceeded. Please try again later.',
+    };
+  }
+  
+  return { isRateLimit: false, message: error.message };
 }
 
 export async function POST(request: NextRequest) {
@@ -256,6 +242,15 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Convert error:', error);
     
+    // Check for rate limit errors
+    const rateLimitInfo = parseRateLimitError(error);
+    if (rateLimitInfo.isRateLimit) {
+      return NextResponse.json(
+        { error: rateLimitInfo.message },
+        { status: 429 }
+      );
+    }
+    
     if (error instanceof Error) {
       if (error.message.includes('API_KEY')) {
         return NextResponse.json(
@@ -263,26 +258,6 @@ export async function POST(request: NextRequest) {
           { status: 500 }
         );
       }
-      
-      // Check for rate limit errors
-      const rateLimitInfo = parseRateLimitError(error);
-      
-      if (rateLimitInfo.isRateLimit) {
-        return NextResponse.json(
-          {
-            error: rateLimitInfo.message,
-            retryAfter: rateLimitInfo.retryAfter,
-            code: 'RATE_LIMIT'
-          },
-          { 
-            status: 429,
-            headers: rateLimitInfo.retryAfter ? {
-              'Retry-After': rateLimitInfo.retryAfter.toString()
-            } : undefined
-          }
-        );
-      }
-      
       return NextResponse.json(
         { error: error.message },
         { status: 500 }

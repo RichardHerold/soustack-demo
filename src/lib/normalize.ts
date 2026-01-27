@@ -14,15 +14,28 @@ type InstructionTiming = Extract<Instruction, { timing?: unknown }>['timing'];
  * Transform a SoustackLiteRecipe into a normalized display format
  */
 export function normalizeToDisplay(recipe: SoustackLiteRecipe): DisplayRecipe {
+  const ingredients = normalizeIngredients(recipe.ingredients);
+  const instructions = normalizeInstructions(recipe.instructions);
+  const miseEnPlace = normalizeMiseEnPlace(recipe.miseEnPlace);
+  const storage = normalizeStorage(recipe.storage);
+  
   return {
     title: recipe.name || 'Untitled Recipe',
     description: recipe.description,
     servings: recipe.servings,
-    miseEnPlace: normalizeMiseEnPlace(recipe.miseEnPlace),
-    ingredients: normalizeIngredients(recipe.ingredients),
-    instructions: normalizeInstructions(recipe.instructions),
-    storage: normalizeStorage(recipe.storage),
+    miseEnPlace,
+    ingredients,
+    instructions,
+    storage,
     totalTime: calculateTotalTime(recipe.instructions),
+    stats: {
+      structuredIngredients: ingredients.filter(i => i.isStructured).length,
+      totalIngredients: ingredients.length,
+      timedSteps: instructions.filter(i => i.hasTiming).length,
+      totalSteps: instructions.length,
+      hasMise: miseEnPlace.length > 0,
+      hasStorage: storage !== undefined && Object.keys(storage).length > 0,
+    },
   };
 }
 
@@ -44,6 +57,7 @@ function normalizeIngredients(items: Ingredient[]): DisplayIngredient[] {
         id,
         text: item,
         name: item,
+        isStructured: false,
       };
     }
     
@@ -63,6 +77,9 @@ function normalizeIngredients(items: Ingredient[]): DisplayIngredient[] {
       parts.push(`— ${item.notes}`);
     }
     
+    // It's structured if we have quantity or unit parsed out
+    const isStructured = item.quantity !== undefined || item.unit !== undefined;
+    
     return {
       id,
       text: parts.join(' '),
@@ -71,6 +88,7 @@ function normalizeIngredients(items: Ingredient[]): DisplayIngredient[] {
       name: item.name,
       notes: item.notes,
       toTaste: item.toTaste,
+      isStructured,
     };
   });
 }
@@ -82,17 +100,19 @@ function normalizeInstructions(items: Instruction[]): DisplayInstruction[] {
     const id = `step-${index}`;
     
     if (typeof item === 'string') {
-      return { id, text: item };
+      return { id, text: item, hasTiming: false };
     }
     
     // Structured instruction
     const timing = formatTiming(item.timing);
+    const hasTiming = timing !== undefined;
     
     return {
       id,
       text: item.text,
       timing,
       isPassive: item.timing?.activity === 'passive',
+      hasTiming,
     };
   });
 }
@@ -141,7 +161,6 @@ function normalizeStorage(storage: SoustackLiteRecipe['storage']): DisplayRecipe
 }
 
 function formatStorageDuration(method: { duration: { iso8601: string }; notes?: string }): string {
-  // Parse ISO8601 duration (e.g., "P3D" = 3 days, "P1W" = 1 week)
   const iso = method.duration.iso8601;
   let text = iso;
   

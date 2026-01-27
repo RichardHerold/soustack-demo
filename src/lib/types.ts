@@ -66,6 +66,15 @@ export type DisplayRecipe = {
   instructions: DisplayInstruction[];
   storage?: DisplayStorage;
   totalTime?: string;
+  // Stats for showing structure extraction
+  stats: {
+    structuredIngredients: number;
+    totalIngredients: number;
+    timedSteps: number;
+    totalSteps: number;
+    hasMise: boolean;
+    hasStorage: boolean;
+  };
 };
 
 export type DisplayIngredient = {
@@ -76,6 +85,7 @@ export type DisplayIngredient = {
   name: string;
   notes?: string;
   toTaste?: boolean;
+  isStructured: boolean; // Did we parse this into parts?
 };
 
 export type DisplayInstruction = {
@@ -83,6 +93,7 @@ export type DisplayInstruction = {
   text: string;
   timing?: string;
   isPassive?: boolean;
+  hasTiming: boolean; // Did we extract timing?
 };
 
 export type DisplayStorage = {

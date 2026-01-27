@@ -3,7 +3,12 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Soustack — Structure any recipe',
-  description: 'Paste a recipe URL or text. Get a structured, cookable recipe.',
+  description: 'Paste a recipe URL or text. Get a structured, cookable recipe with mise en place, parsed ingredients, and timing extracted.',
+  openGraph: {
+    title: 'Soustack — Structure any recipe',
+    description: 'Paste a recipe URL or text. Get a structured, cookable recipe.',
+    type: 'website',
+  },
 };
 
 export default function RootLayout({

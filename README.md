@@ -4,20 +4,32 @@
 
 A single-purpose demo that converts any recipe (URL or pasted text) into a structured, beautiful format using the [Soustack](https://soustack.org) specification.
 
+Live at [soustack.app](https://soustack.app)
+
 ## What it does
 
 1. Paste a recipe URL or text
 2. AI extracts structure: ingredients, instructions, timing, mise en place
 3. See the recipe rendered in proper mise form
+4. Check off prep tasks interactively
+5. View or copy the structured JSON
 
 No auth. No database. No save. Just conversion.
 
+## v0.2 Features
+
+- **Interactive mise en place** — Check off prep tasks before cooking
+- **Structure indicators** — See which ingredients were parsed, which steps have timing
+- **Example recipes** — One-click examples to try without finding your own
+- **Recipe/JSON toggle** — Switch between rendered view and raw Soustack JSON
+- **Better prompting** — Improved extraction of prep tasks and passive timing
+
 ## The Output
 
-- **Mise en Place** — prep tasks to do before cooking
-- **Structured Ingredients** — quantity, unit, name parsed separately  
+- **Mise en Place** — prep tasks to do before cooking (interactive checkboxes!)
+- **Structured Ingredients** — quantity, unit, name parsed separately (highlighted when parsed)
 - **Timed Instructions** — active vs passive time, completion cues
-- **Storage Info** — if the recipe mentions it
+- **Storage Info** — how long it keeps, if the recipe mentions it
 
 ## Quick Start
 

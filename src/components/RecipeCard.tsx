@@ -1,17 +1,86 @@
 'use client';
 
+import { useState } from 'react';
 import type { DisplayRecipe } from '@/lib/types';
 
 type RecipeCardProps = {
   recipe: DisplayRecipe;
+  showJson: boolean;
+  rawRecipe: object;
 };
 
-export default function RecipeCard({ recipe }: RecipeCardProps) {
+export default function RecipeCard({ recipe, showJson, rawRecipe }: RecipeCardProps) {
+  const [checkedMise, setCheckedMise] = useState<Set<number>>(new Set());
+  
   const hasMise = recipe.miseEnPlace.length > 0;
   const hasStorage = recipe.storage && Object.keys(recipe.storage).length > 0;
   
+  const toggleMise = (index: number) => {
+    setCheckedMise(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+  
+  const miseProgress = hasMise 
+    ? Math.round((checkedMise.size / recipe.miseEnPlace.length) * 100)
+    : 0;
+  
+  // JSON view
+  if (showJson) {
+    return (
+      <article className="recipe-card json-view">
+        <header className="json-header">
+          <h2>Soustack JSON</h2>
+          <p className="json-hint">This is the structured data extracted from your recipe</p>
+        </header>
+        <pre className="json-content">
+          <code>{JSON.stringify(rawRecipe, null, 2)}</code>
+        </pre>
+      </article>
+    );
+  }
+  
   return (
     <article className="recipe-card">
+      {/* Structure Stats Banner */}
+      <div className="structure-banner">
+        <span className="structure-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="9 11 12 14 22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+          Structured by Soustack
+        </span>
+        <div className="structure-stats">
+          {recipe.stats.structuredIngredients > 0 && (
+            <span className="stat-item" title="Ingredients parsed into quantity, unit, and name">
+              {recipe.stats.structuredIngredients}/{recipe.stats.totalIngredients} ingredients parsed
+            </span>
+          )}
+          {recipe.stats.timedSteps > 0 && (
+            <span className="stat-item" title="Steps with timing extracted">
+              {recipe.stats.timedSteps} timed steps
+            </span>
+          )}
+          {recipe.stats.hasMise && (
+            <span className="stat-item" title="Prep tasks identified">
+              mise en place ✓
+            </span>
+          )}
+          {recipe.stats.hasStorage && (
+            <span className="stat-item" title="Storage info found">
+              storage ✓
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* Header */}
       <header className="recipe-header">
         <h1>{recipe.title}</h1>
@@ -42,21 +111,44 @@ export default function RecipeCard({ recipe }: RecipeCardProps) {
         </div>
       </header>
 
-      {/* Mise en Place */}
+      {/* Mise en Place - Interactive! */}
       {hasMise && (
         <section className="recipe-section mise-section">
-          <h2>
-            <span className="section-icon">✓</span>
-            Before You Start
-          </h2>
+          <div className="mise-header">
+            <h2>
+              <span className="section-icon">✓</span>
+              Before You Start
+            </h2>
+            {miseProgress > 0 && (
+              <span className="mise-progress">
+                {miseProgress}% ready
+              </span>
+            )}
+          </div>
+          <p className="mise-hint">Check off tasks as you prep — this is what makes cooking smoother</p>
           <ul className="mise-list">
             {recipe.miseEnPlace.map((task, i) => (
-              <li key={i} className="mise-item">
-                <span className="mise-checkbox" />
+              <li 
+                key={i} 
+                className={`mise-item ${checkedMise.has(i) ? 'mise-item--checked' : ''}`}
+                onClick={() => toggleMise(i)}
+              >
+                <span className={`mise-checkbox ${checkedMise.has(i) ? 'mise-checkbox--checked' : ''}`}>
+                  {checkedMise.has(i) && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </span>
                 <span className="mise-text">{task}</span>
               </li>
             ))}
           </ul>
+          {miseProgress === 100 && (
+            <div className="mise-complete">
+              🎉 Ready to cook!
+            </div>
+          )}
         </section>
       )}
 
@@ -67,19 +159,25 @@ export default function RecipeCard({ recipe }: RecipeCardProps) {
           <h2>Ingredients</h2>
           <ul className="ingredients-list">
             {recipe.ingredients.map((ing) => (
-              <li key={ing.id} className="ingredient-item">
-                {ing.quantity && (
-                  <span className="ingredient-qty">{ing.quantity}</span>
-                )}
-                {ing.unit && (
-                  <span className="ingredient-unit">{ing.unit}</span>
-                )}
-                <span className="ingredient-name">{ing.name}</span>
-                {ing.toTaste && (
-                  <span className="ingredient-note">to taste</span>
-                )}
-                {ing.notes && (
-                  <span className="ingredient-note">{ing.notes}</span>
+              <li key={ing.id} className={`ingredient-item ${ing.isStructured ? 'ingredient-item--structured' : ''}`}>
+                {ing.isStructured ? (
+                  <>
+                    {ing.quantity && (
+                      <span className="ingredient-qty">{ing.quantity}</span>
+                    )}
+                    {ing.unit && (
+                      <span className="ingredient-unit">{ing.unit}</span>
+                    )}
+                    <span className="ingredient-name">{ing.name}</span>
+                    {ing.toTaste && (
+                      <span className="ingredient-note">to taste</span>
+                    )}
+                    {ing.notes && (
+                      <span className="ingredient-note">{ing.notes}</span>
+                    )}
+                  </>
+                ) : (
+                  <span className="ingredient-text">{ing.text}</span>
                 )}
               </li>
             ))}
@@ -97,6 +195,10 @@ export default function RecipeCard({ recipe }: RecipeCardProps) {
                   <p className="step-text">{step.text}</p>
                   {step.timing && (
                     <span className={`timing-badge ${step.isPassive ? 'timing-passive' : ''}`}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
                       {step.timing}
                     </span>
                   )}
