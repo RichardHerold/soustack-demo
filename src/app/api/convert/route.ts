@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { SoustackLiteRecipe } from '@/lib/types';
+import type { SoustackLiteRecipe, Ingredient, Instruction } from '@/lib/types';
 
 // ============================================================================
 // Configuration
@@ -466,91 +466,76 @@ function parseTime(timeStr?: string | null): { minutes: number } | undefined {
   return totalMinutes > 0 ? { minutes: Math.round(totalMinutes) } : undefined;
 }
 
-function transformIngredients(ingredients: Array<string | RawIngredient>): unknown[] {
-  let idCounter = 1;
-
+function transformIngredients(ingredients: Array<string | RawIngredient>): Ingredient[] {
   return ingredients.flatMap(ing => {
     if (typeof ing === 'string') {
       // Check for "to taste" in string
       if (/to\s*taste/i.test(ing)) {
-        return handleToTasteString(ing, () => `ing-${idCounter++}`);
+        return handleToTasteString(ing);
       }
       return ing;
     }
 
-    const result: Record<string, unknown> = {
-      id: `ing-${idCounter++}`,
+    const result: Ingredient = {
       name: ing.name,
     };
 
-    if (ing.quantity != null && ing.unit) {
-      result.quantity = { amount: ing.quantity, unit: ing.unit };
+    if (ing.quantity != null) {
+      result.quantity = ing.quantity;
     }
-
-    if (ing.prep) result.prep = ing.prep;
-    if (ing.notes && !/^to\s*taste$/i.test(ing.notes)) result.notes = ing.notes;
-    if (ing.toTaste) result.scaling = { mode: 'toTaste' };
+    if (ing.unit) {
+      result.unit = ing.unit;
+    }
+    if (ing.notes && !/^to\s*taste$/i.test(ing.notes)) {
+      result.notes = ing.notes;
+    }
+    if (ing.toTaste) {
+      result.toTaste = true;
+    }
 
     return result;
   });
 }
 
-function handleToTasteString(str: string, genId: () => string): unknown[] {
+function handleToTasteString(str: string): Ingredient[] {
   // "salt and pepper to taste"
   const compoundMatch = str.match(/^(.+?)\s+and\s+(.+?)\s+to\s*taste$/i);
   if (compoundMatch) {
     return [
-      { id: genId(), name: compoundMatch[1].trim(), scaling: { mode: 'toTaste' } },
-      { id: genId(), name: compoundMatch[2].trim(), scaling: { mode: 'toTaste' } },
+      { name: compoundMatch[1].trim(), toTaste: true },
+      { name: compoundMatch[2].trim(), toTaste: true },
     ];
   }
 
   // "X to taste"
   const singleMatch = str.match(/^(.+?)\s+to\s*taste$/i);
   if (singleMatch) {
-    return [{ id: genId(), name: singleMatch[1].trim(), scaling: { mode: 'toTaste' } }];
+    return [{ name: singleMatch[1].trim(), toTaste: true }];
   }
 
   return [str];
 }
 
-function transformInstructions(instructions: Array<string | RawInstruction>): unknown[] {
-  let idCounter = 1;
-
+function transformInstructions(instructions: Array<string | RawInstruction>): Instruction[] {
   return instructions.map(inst => {
     if (typeof inst === 'string') return inst;
 
-    const result: Record<string, unknown> = {
-      id: `step-${idCounter++}`,
+    const result: Instruction = {
       text: inst.text,
     };
 
     if (inst.timing) {
-      const timing: Record<string, unknown> = {};
+      const timing: Instruction['timing'] = {};
       if (inst.timing.activity) timing.activity = inst.timing.activity;
       if (inst.timing.minMinutes != null && inst.timing.maxMinutes != null) {
-        timing.duration = { minMinutes: inst.timing.minMinutes, maxMinutes: inst.timing.maxMinutes };
+        // Convert range to average minutes
+        const avgMinutes = Math.round((inst.timing.minMinutes + inst.timing.maxMinutes) / 2);
+        timing.duration = { minutes: avgMinutes };
       } else if (inst.timing.minutes != null) {
         timing.duration = { minutes: inst.timing.minutes };
       }
       if (inst.timing.completionCue) timing.completionCue = inst.timing.completionCue;
       if (Object.keys(timing).length) result.timing = timing;
-    }
-
-    if (inst.temperature) {
-      const temp: Record<string, unknown> = { target: inst.temperature.value ? 'oven' : 'stovetop' };
-      if (inst.temperature.value) {
-        temp.value = inst.temperature.value;
-        temp.unit = inst.temperature.unit === 'C' ? 'celsius' : 'fahrenheit';
-      }
-      if (inst.temperature.level) {
-        const levelMap: Record<string, string> = {
-          'low': 'low', 'medium-low': 'low', 'medium': 'medium',
-          'medium-high': 'mediumHigh', 'high': 'high',
-        };
-        temp.level = levelMap[inst.temperature.level.toLowerCase()] || inst.temperature.level;
-      }
-      result.temperature = temp;
     }
 
     return result;
@@ -592,20 +577,20 @@ function parseDurationToISO(str: string): { iso8601: string } {
 }
 
 function inferStacks(
-  ingredients: unknown[],
-  instructions: unknown[],
+  ingredients: Ingredient[],
+  instructions: Instruction[],
   miseEnPlace?: Array<{ text: string }>,
   storage?: Record<string, unknown>
 ): Record<string, number> {
   const stacks: Record<string, number> = {};
 
   const hasQuantified = ingredients.some(
-    ing => typeof ing === 'object' && ing !== null && 'quantity' in ing && 'id' in ing
+    ing => typeof ing === 'object' && ing !== null && 'quantity' in ing
   );
   if (hasQuantified) stacks.quantified = 1;
 
   const hasStructured = instructions.some(
-    inst => typeof inst === 'object' && inst !== null && 'id' in inst
+    inst => typeof inst === 'object' && inst !== null && 'timing' in inst
   );
   if (hasStructured) stacks.structured = 1;
 
