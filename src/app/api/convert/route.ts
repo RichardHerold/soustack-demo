@@ -525,7 +525,11 @@ function transformInstructions(instructions: Array<string | RawInstruction>): In
     };
 
     if (inst.timing) {
-      const timing: Instruction['timing'] = {};
+      const timing: {
+        duration?: { minutes?: number; hours?: number };
+        activity?: 'active' | 'passive';
+        completionCue?: string;
+      } = {};
       if (inst.timing.activity) timing.activity = inst.timing.activity;
       if (inst.timing.minMinutes != null && inst.timing.maxMinutes != null) {
         // Convert range to average minutes
