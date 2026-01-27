@@ -22,10 +22,10 @@ export const EXAMPLE_RECIPES = [
     description: 'Fast prep with mise en place critical',
   },
   {
-    id: 'allrecipes-apple-kuchen',
-    label: 'Easy Apple Kuchen',
-    url: 'https://www.allrecipes.com/recipe/238839/easy-apple-kuchen/',
-    description: 'Simple dessert with apples and cinnamon topping',
+    id: 'allrecipes-pancakes',
+    label: 'Good Old-Fashioned Pancakes',
+    url: 'https://www.allrecipes.com/recipe/21014/good-old-fashioned-pancakes/',
+    description: 'Classic breakfast recipe with simple ingredients',
   },
 ] as const;
 

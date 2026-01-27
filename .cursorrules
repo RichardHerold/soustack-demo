@@ -1,0 +1,53 @@
+# UI Protection Rules
+
+## Critical: Do NOT Modify UI Unless Explicitly Requested
+
+**NEVER modify UI components, styling, layout, or visual elements unless the user explicitly asks for UI changes.**
+
+### UI-Related Files That Require Explicit Permission:
+- `src/app/page.tsx` - Main page component
+- `src/components/**/*.tsx` - All React components
+- `src/app/**/*.css` - All stylesheets
+- `src/app/globals.css` - Global styles
+- Any file containing JSX/TSX markup or CSS
+
+### What Requires Explicit Permission:
+- Changing text content, labels, or copy
+- Modifying component structure or layout
+- Changing colors, spacing, fonts, or visual styling
+- Adding or removing UI elements
+- Changing button text, placeholders, or form labels
+- Modifying logo sizes, images, or icons
+- Changing class names or CSS selectors
+- Restructuring HTML/JSX markup
+- Adding or removing sections/features in the UI
+
+### What You CAN Do Without Permission:
+- Fix bugs in logic (not UI)
+- Improve error handling
+- Add functionality that doesn't change existing UI
+- Refactor code structure (preserving exact UI output)
+- Update API routes or backend logic
+- Fix TypeScript errors
+- Improve performance optimizations
+
+### When UI Changes Are Requested:
+- If the user asks for UI changes, confirm what specific changes they want
+- Show a summary of proposed UI changes before implementing
+- Preserve existing functionality while making UI updates
+
+### Examples:
+
+❌ **BAD** - Don't do this without explicit request:
+- "I'll improve the button styling"
+- "Let me update the header text"
+- "I'll make the layout more modern"
+
+✅ **GOOD** - These are fine:
+- "I'll fix the error handling logic"
+- "I'll add validation to the API route"
+- "I'll optimize the data fetching"
+
+## Backend vs Frontend
+
+When working on backend/API code (`src/app/api/**`), you have more freedom to improve logic, error handling, and functionality. However, if changes affect what the frontend displays, ensure the UI behavior remains consistent unless explicitly requested to change.

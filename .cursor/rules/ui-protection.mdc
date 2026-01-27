@@ -1,0 +1,55 @@
+---
+description: Prevent accidental UI modifications - UI changes require explicit user request
+globs: "**/*.tsx,**/*.jsx,**/*.css,src/app/**/*.tsx,src/components/**/*.tsx"
+alwaysApply: true
+---
+
+# UI Protection Rule
+
+## Critical: Do NOT Modify UI Without Explicit Request
+
+**NEVER modify UI components, styling, layout, or visual elements unless the user explicitly requests UI changes.**
+
+### Protected Elements
+
+- Component structure and JSX markup
+- Text content, labels, headings, placeholders
+- Button text and UI copy
+- Colors, spacing, fonts, visual styling
+- Layout structure and component hierarchy
+- Logo sizes, images, icons
+- CSS classes and styling
+- Form elements and their presentation
+
+### What You CAN Do
+
+- Fix bugs in logic (not UI appearance)
+- Improve error handling and validation
+- Add functionality that doesn't change existing UI
+- Refactor code (preserving exact UI output)
+- Update API routes and backend logic
+- Fix TypeScript/linting errors
+- Optimize performance
+
+### When UI Changes Are Requested
+
+1. Confirm the specific changes desired
+2. Show a summary of proposed changes
+3. Preserve all existing functionality
+4. Test thoroughly
+
+### Example Violations
+
+❌ Changing button text from "Convert" to "Submit" without request
+❌ Updating header text or styling
+❌ Modifying logo size or positioning
+❌ Restructuring component layout
+❌ Changing colors or spacing
+
+### Example Allowed Actions
+
+✅ Improving error handling logic
+✅ Adding API validation
+✅ Fixing TypeScript errors
+✅ Optimizing data fetching
+✅ Refactoring code structure (same output)
