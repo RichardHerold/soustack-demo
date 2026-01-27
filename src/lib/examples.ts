@@ -4,12 +4,6 @@
  */
 export const EXAMPLE_RECIPES = [
   {
-    id: 'nyt-chicken',
-    label: 'NYT Chicken Marbella',
-    url: 'https://cooking.nytimes.com/recipes/1016212-chicken-marbella',
-    description: 'Classic dinner party recipe with complex prep',
-  },
-  {
     id: 'serious-eats-steak',
     label: 'Serious Eats Reverse Sear',
     url: 'https://www.seriouseats.com/reverse-seared-steak-recipe',
@@ -26,6 +20,12 @@ export const EXAMPLE_RECIPES = [
     label: 'Kenji\'s Fried Rice',
     url: 'https://www.seriouseats.com/easy-vegetable-fried-rice-recipe',
     description: 'Fast prep with mise en place critical',
+  },
+  {
+    id: 'allrecipes-apple-kuchen',
+    label: 'Easy Apple Kuchen',
+    url: 'https://www.allrecipes.com/recipe/238839/easy-apple-kuchen/',
+    description: 'Simple dessert with apples and cinnamon topping',
   },
 ] as const;
 
