@@ -1,5 +1,6 @@
 /**
- * Soustack Lite Recipe - the core data format
+ * Soustack Recipe - the core data format
+ * Supports both "lite" and "base" profiles per the Soustack spec
  */
 export type SoustackRecipe = {
   $schema: string;
@@ -7,9 +8,17 @@ export type SoustackRecipe = {
   stacks: Record<string, number>;
   name: string;
   description?: string;
+  yield?: {
+    amount: number;
+    unit: string;
+  };
+  time?: {
+    total: {
+      minutes: number;
+    };
+  };
+  // Legacy field - kept for backward compatibility
   servings?: string;
-  yield?: { amount: number; unit: string };
-  time?: { total: { minutes: number } };
   ingredients: Ingredient[];
   instructions: Instruction[];
   miseEnPlace?: MiseEnPlaceItem[];
@@ -17,39 +26,64 @@ export type SoustackRecipe = {
   'x-soustack'?: {
     source?: {
       text: string;
+      url?: string;
       convertedAt: string;
       converter: string;
     };
   };
+  // Legacy field name
   'x-mise'?: {
     source?: {
       text: string;
-      intent: 'convert' | 'draft';
+      intent?: 'convert' | 'draft';
       convertedAt: string;
       converter: string;
     };
   };
 };
 
+// Keep old name as alias for backward compatibility
+export type SoustackLiteRecipe = SoustackRecipe;
+
 export type Ingredient = 
   | string 
   | {
+      id?: string;
       name: string;
-      quantity?: number | string;
+      quantity?: {
+        amount: number;
+        unit: string;
+      };
+      // Legacy format - quantity as number/string directly
+      // Keep for backward compatibility with existing data
       unit?: string;
+      prep?: string;
       notes?: string;
       toTaste?: boolean;
+      scaling?: {
+        mode: 'toTaste' | 'linear' | 'fixed';
+      };
     };
 
 export type Instruction = 
   | string 
   | {
+      id?: string;
       text: string;
       timing?: {
-        duration?: { minutes?: number; hours?: number };
         activity?: 'active' | 'passive';
+        duration?: 
+          | { minutes: number }
+          | { minMinutes: number; maxMinutes: number };
         completionCue?: string;
       };
+      temperature?: {
+        target: 'oven' | 'stovetop' | 'internal' | 'oil' | 'pan' | 'grill';
+        level?: 'low' | 'medium' | 'mediumHigh' | 'high';
+        unit?: 'celsius' | 'fahrenheit';
+        value?: number;
+      };
+      inputs?: string[];
     };
 
 export type MiseEnPlaceItem = {
@@ -94,7 +128,7 @@ export type DisplayIngredient = {
   name: string;
   notes?: string;
   toTaste?: boolean;
-  isStructured: boolean; // Did we parse this into parts?
+  isStructured: boolean;
 };
 
 export type DisplayInstruction = {
@@ -102,7 +136,7 @@ export type DisplayInstruction = {
   text: string;
   timing?: string;
   isPassive?: boolean;
-  hasTiming: boolean; // Did we extract timing?
+  hasTiming: boolean;
 };
 
 export type DisplayStorage = {
