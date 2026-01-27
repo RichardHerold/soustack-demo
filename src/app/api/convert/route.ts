@@ -92,10 +92,23 @@ async function maybeFetchUrl(text: string): Promise<string> {
       
       try {
         const data = JSON.parse(jsonContent);
+        
+        // Helper to check if an item is a Recipe type
+        const isRecipe = (item: any): boolean => {
+          if (!item) return false;
+          const type = item['@type'] || item.type;
+          if (!type) return false;
+          // Handle both string and array formats
+          if (Array.isArray(type)) {
+            return type.includes('Recipe');
+          }
+          return type === 'Recipe';
+        };
+        
         // Handle both single objects and arrays
         const recipes = Array.isArray(data) 
-          ? data.filter((item: any) => item['@type'] === 'Recipe' || item.type === 'Recipe')
-          : (data['@type'] === 'Recipe' || data.type === 'Recipe' ? [data] : []);
+          ? data.filter(isRecipe)
+          : (isRecipe(data) ? [data] : []);
         
         if (recipes.length > 0) {
           const recipe = recipes[0];
