@@ -39,7 +39,7 @@
   /* Typography */
   --font-display: 'Fraunces', Georgia, serif;
   --font-body: 'DM Sans', -apple-system, sans-serif;
-  --font-mono: 'SF Mono', 'Fira Code', monospace;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', 'Fira Code', monospace;
   
   /* Spacing */
   --space-xs: 0.25rem;
@@ -87,6 +87,42 @@ main {
 }
 
 /* ==========================================================================
+   Logo Header
+   ========================================================================== */
+
+.logo-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: var(--space-lg) var(--space-xl);
+  padding-bottom: var(--space-md);
+  justify-content: flex-start;
+  margin-bottom: var(--space-xl);
+  width: 100%;
+  max-width: 100%;
+  align-self: flex-start;
+}
+
+.logo-image {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+
+.logo-text {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  display: inline-block;
+}
+
+/* ==========================================================================
    Input View — The Paste Screen
    ========================================================================== */
 
@@ -96,7 +132,7 @@ main {
   flex-direction: column;
   align-items: center;
   padding: var(--space-xl);
-  padding-top: var(--space-3xl);
+  padding-top: var(--space-lg);
 }
 
 .input-container {
@@ -379,7 +415,11 @@ main {
 .result-view {
   min-height: 100vh;
   padding: var(--space-xl);
+  padding-top: var(--space-lg);
   animation: fadeUp 0.4s ease-out;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .result-container {
@@ -917,8 +957,14 @@ main {
    ========================================================================== */
 
 @media (max-width: 600px) {
+  .logo-header {
+    padding: var(--space-md) var(--space-lg);
+    padding-bottom: var(--space-sm);
+    margin-bottom: var(--space-md);
+  }
+  
   .input-view {
-    padding-top: var(--space-xl);
+    padding-top: var(--space-md);
   }
   
   .input-header h1 {

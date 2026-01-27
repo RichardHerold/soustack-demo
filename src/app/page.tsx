@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import RecipeCard from '@/components/RecipeCard';
 import { normalizeToDisplay } from '@/lib/normalize';
 import { EXAMPLE_RECIPES, EXAMPLE_TEXT } from '@/lib/examples';
@@ -92,6 +93,10 @@ export default function Home() {
     
     return (
       <div className="result-view">
+        <div className="logo-header">
+          <Image src="/logo.png" alt="Soustack" width={32} height={32} className="logo-image" />
+          <span className="logo-text">Soustack</span>
+        </div>
         <div className="result-container">
           <div className="result-actions">
             <button onClick={handleReset} className="btn-back">
@@ -149,6 +154,10 @@ export default function Home() {
   // Input view
   return (
     <div className="input-view">
+      <div className="logo-header">
+        <Image src="/logo.png" alt="Soustack" width={32} height={32} className="logo-image" />
+        <span className="logo-text">Soustack</span>
+      </div>
       <div className="input-container">
         <header className="input-header">
           <h1>Paste a recipe</h1>
