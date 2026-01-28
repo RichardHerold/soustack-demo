@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import RecipeCard from '@/components/RecipeCard';
 import { normalizeToDisplay } from '@/lib/normalize';
@@ -14,6 +14,52 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showJson, setShowJson] = useState(false);
+
+  // Handle URL parameters on page load
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const recipeId = params.get('id');
+    const recipeParam = params.get('recipe');
+    
+    // Handle ?id= parameter (store API)
+    if (recipeId) {
+      fetch(`/api/store?id=${encodeURIComponent(recipeId)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.recipe) {
+            setRecipe(data.recipe);
+          } else if (data.error) {
+            setError(data.error);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to load recipe from store:', err);
+          setError('Failed to load recipe');
+        })
+        .finally(() => {
+          // Clean URL
+          window.history.replaceState({}, '', window.location.pathname);
+        });
+      return;
+    }
+    
+    // Handle ?recipe= parameter (backwards compatible base64)
+    if (recipeParam) {
+      try {
+        const decoded = decodeURIComponent(escape(atob(recipeParam)));
+        const parsedRecipe = JSON.parse(decoded) as SoustackRecipe;
+        if (parsedRecipe?.name && Array.isArray(parsedRecipe?.ingredients)) {
+          setRecipe(parsedRecipe);
+        }
+      } catch (err) {
+        console.error('Failed to parse recipe from URL:', err);
+        setError('Invalid recipe in URL');
+      } finally {
+        // Clean URL
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
+  }, []);
 
   const handleConvert = async (text?: string) => {
     const textToConvert = text || input;
